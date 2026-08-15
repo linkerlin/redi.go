@@ -224,13 +224,27 @@ func TestWire_DelayedQueueLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	rc := rawClient(t)
-	n, err := rc.ZCard(testCtx, "redisson_delay_queue:{"+name+"}").Result()
+
+	// Redisson layout (4.6.1 verified): the timeout set holds the packed
+	// member at redisson_delay_queue_timeout:{name}; the internal queue is
+	// a LIST (not a zset) with the same packed member.
+	n, err := rc.ZCard(testCtx, "redisson_delay_queue_timeout:{"+name+"}").Result()
 	if err != nil || n != 1 {
-		t.Fatalf("redisson_delay_queue zset = %d, %v; want 1", n, err)
+		t.Fatalf("timeout zset = %d, %v; want 1", n, err)
 	}
-	member, _ := rc.ZRange(testCtx, "redisson_delay_queue:{"+name+"}", 0, 0).Result()
-	if len(member) != 1 || member[0] != `"x"` {
-		t.Fatalf("delayed member = %v, want JSON-encoded", member)
+	members, _ := rc.ZRange(testCtx, "redisson_delay_queue_timeout:{"+name+"}", 0, 0).Result()
+	if len(members) != 1 {
+		t.Fatalf("timeout members = %v", members)
+	}
+	packed := members[0]
+	t.Logf("packed member: len=%d hex=%x", len(packed), packed)
+	_, encoded, ok := redi.UnpackDelayedMember(packed)
+	if !ok || encoded != `"x"` {
+		t.Fatalf("packed member decodes to %q (ok=%v), want JSON-encoded value", encoded, ok)
+	}
+	qType, _ := rc.Type(testCtx, "redisson_delay_queue:{"+name+"}").Result()
+	if qType != "list" {
+		t.Fatalf("internal delay queue type = %q, want list", qType)
 	}
 }
 

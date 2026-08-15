@@ -123,14 +123,6 @@ def main() -> None:
     elif cmd == "latch_count":
         emit({"count": RCountDownLatch(r, a[0]).get_count()})
 
-    elif cmd == "dq_offer":
-        RDelayedQueue(r, a[0]).offer(json.loads(a[1]), int(a[2]))
-        emit({"ok": True})
-
-    elif cmd == "dq_delayed_size":
-        size = r.zcard(f"redisson_delay_queue:{{{a[0]}}}")
-        emit({"size": size})
-
     elif cmd == "setmm_put":
         m = RSetMultimap(r, a[0])
         emit({"ok": m.put(json.loads(a[1]), json.loads(a[2]))})

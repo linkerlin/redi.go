@@ -373,23 +373,13 @@ func TestInterop_RCountDownLatch(t *testing.T) {
 }
 
 func TestInterop_RDelayedQueue(t *testing.T) {
-	client := newTestClient(t)
-	name := uniqueKey(t, "io-dq")
-	t.Cleanup(func() { interopCleanup(t, name, "redisson_delay_queue:{"+name+"}") })
-	q := client.GetDelayedQueue(name)
-
-	if err := q.Offer(testCtx, "from-go", time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	if reply := runProbe(t, "dq_delayed_size", name); reply["size"] != float64(1) {
-		t.Fatalf("python sees delayed size = %v; want 1", reply["size"])
-	}
-
-	runProbe(t, "dq_offer", name, `"from-python"`, "3600000")
-	n, err := q.DelayedSize(testCtx)
-	if err != nil || n != 2 {
-		t.Fatalf("Go DelayedSize after python offer = %d, %v; want 2", n, err)
-	}
+	// redi.py still implements the pre-4.x single-ZSET delayed queue layout,
+	// which is NOT interoperable with Redisson 4.6.1 (verified: Java uses a
+	// timeout ZSET + internal LIST pair with struct-packed members). redi.go
+	// follows Java; cross-language assertions with redi.py are therefore not
+	// possible here — see TestJavaInterop_RDelayedQueue for the real
+	// cross-language coverage.
+	t.Skip("redi.py delayed-queue layout predates Redisson 4.x; Go follows the verified 4.6.1 wire format")
 }
 
 // TestInterop_RSetMultimap verifies the deterministic internal collection

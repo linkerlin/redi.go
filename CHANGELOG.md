@@ -72,5 +72,9 @@ RReadWriteLock、RSemaphore、RCountDownLatch、RRateLimiter、RDelayedQueue、R
 - **Dashboard 三页签**：INFO（服务器指标）/ Locks（持锁者、重入计数×N、TTL，`Run(client.Redis(), patterns...)` 指定扫描范围）/ Limiters（限流器 rate/interval/剩余许可）；`1/2/3` 或 `←/→` 切换
 - dashboard 首次引入单元测试（parseInfo/buildRows/buildLockRows/buildLimiterRows/formatHolders）
 
+### 追加（同日第八轮）
+- **Java 直接互操作扩到 14 组用例**（新增 RWLock / RList / RScoredSortedSet / RLexSortedSet / RBucket / RMapCache / RDelayedQueue 双向）
+- **RDelayedQueue 按 Redisson 4.6.1 真实布局重写**（Java 实测发现 redi.py 为旧格式）：`redisson_delay_queue_timeout:{name}` ZSET + `redisson_delay_queue:{name}` LIST 双结构、`Bc0Lc0` struct-packed member（长度前缀**小端 8 字节**）、原版迁移 Lua（unpack→RPUSH+LREM+ZREM）；Java↔Go 双向迁移实测通过
+
 ## v0.1.0
 初始版本：RLock/RMap/RList/RSet/RAtomicLong/RQueue + TUI dashboard。

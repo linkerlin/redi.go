@@ -4,10 +4,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.redisson.Redisson;
 import org.redisson.api.RAtomicLong;
 import org.redisson.api.RBloomFilter;
+import org.redisson.api.RBucket;
+import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RCountDownLatch;
+import org.redisson.api.RDelayedQueue;
+import org.redisson.api.RLexSortedSet;
+import org.redisson.api.RList;
 import org.redisson.api.RLock;
 import org.redisson.api.RMap;
+import org.redisson.api.RMapCache;
 import org.redisson.api.RRateLimiter;
+import org.redisson.api.RReadWriteLock;
+import org.redisson.api.RScoredSortedSet;
 import org.redisson.api.RSemaphore;
 import org.redisson.api.RateIntervalUnit;
 import org.redisson.api.RateType;
@@ -16,6 +24,7 @@ import org.redisson.codec.JsonJacksonCodec;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -32,6 +41,7 @@ public final class RedigoProbe {
     private static RedissonClient rs;
     private static final ObjectMapper OM = new ObjectMapper();
     private static RLock heldLock;
+    private static RReadWriteLock heldRwLock;
 
     public static void main(String[] args) throws Exception {
         org.redisson.config.Config cfg = new org.redisson.config.Config();
@@ -62,6 +72,9 @@ public final class RedigoProbe {
         }
         if (heldLock != null && heldLock.isHeldByCurrentThread()) {
             heldLock.unlock();
+        }
+        if (heldRwLock != null && heldRwLock.writeLock().isHeldByCurrentThread()) {
+            heldRwLock.writeLock().unlock();
         }
         rs.shutdown();
     }
@@ -100,6 +113,101 @@ public final class RedigoProbe {
             case "map_get" -> {
                 RMap<Object, Object> m = rs.getMap(a[1]);
                 reply(map("value", m.get(OM.readValue(a[2], Object.class))));
+            }
+
+            case "rw_write_hold" -> {
+                RReadWriteLock rw = rs.getReadWriteLock(a[1]);
+                boolean acq = rw.writeLock().tryLock(0, 60000, TimeUnit.MILLISECONDS);
+                heldRwLock = acq ? rw : null;
+                reply(map("acquired", acq));
+            }
+            case "rw_read_try" -> {
+                RReadWriteLock rw = rs.getReadWriteLock(a[1]);
+                reply(map("acquired", rw.readLock().tryLock(0, 60000, TimeUnit.MILLISECONDS)));
+            }
+            case "rw_write_try" -> {
+                RReadWriteLock rw = rs.getReadWriteLock(a[1]);
+                reply(map("acquired", rw.writeLock().tryLock(0, 60000, TimeUnit.MILLISECONDS)));
+            }
+            case "rw_release" -> {
+                if (heldRwLock != null && heldRwLock.writeLock().isHeldByCurrentThread()) {
+                    heldRwLock.writeLock().unlock();
+                }
+                heldRwLock = null;
+                reply(map("released", true));
+            }
+
+            case "list_add" -> {
+                RList<Object> l = rs.getList(a[1]);
+                reply(map("ok", l.add(OM.readValue(a[2], Object.class))));
+            }
+            case "list_get" -> {
+                RList<Object> l = rs.getList(a[1]);
+                reply(map("value", l.get(Integer.parseInt(a[2]))));
+            }
+            case "list_size" -> {
+                RList<Object> l = rs.getList(a[1]);
+                reply(map("size", l.size()));
+            }
+
+            case "zset_add" -> {
+                RScoredSortedSet<Object> z = rs.getScoredSortedSet(a[1]);
+                reply(map("ok", z.add(Double.parseDouble(a[2]), OM.readValue(a[3], Object.class))));
+            }
+            case "zset_score" -> {
+                RScoredSortedSet<Object> z = rs.getScoredSortedSet(a[1]);
+                reply(map("value", z.getScore(OM.readValue(a[2], Object.class))));
+            }
+            case "zset_rank" -> {
+                RScoredSortedSet<Object> z = rs.getScoredSortedSet(a[1]);
+                reply(map("value", z.rank(OM.readValue(a[2], Object.class))));
+            }
+
+            case "lex_add" -> {
+                RLexSortedSet s = rs.getLexSortedSet(a[1]);
+                reply(map("ok", s.add(a[2])));
+            }
+            case "lex_range" -> {
+                RLexSortedSet s = rs.getLexSortedSet(a[1]);
+                reply(map("values", new ArrayList<>(s.range(a[2], Boolean.parseBoolean(a[3]),
+                        a[4], Boolean.parseBoolean(a[5])))));
+            }
+            case "lex_first" -> {
+                RLexSortedSet s = rs.getLexSortedSet(a[1]);
+                reply(map("value", s.first()));
+            }
+
+            case "bucket_set" -> {
+                RBucket<Object> b = rs.getBucket(a[1]);
+                b.set(OM.readValue(a[2], Object.class));
+                reply(map("ok", true));
+            }
+            case "bucket_get" -> {
+                RBucket<Object> b = rs.getBucket(a[1]);
+                reply(map("value", b.get()));
+            }
+
+            case "mapcache_put" -> {
+                RMapCache<Object, Object> mc = rs.getMapCache(a[1]);
+                mc.put(OM.readValue(a[2], Object.class), OM.readValue(a[3], Object.class),
+                        Long.parseLong(a[4]), TimeUnit.MILLISECONDS);
+                reply(map("ok", true));
+            }
+            case "mapcache_get" -> {
+                RMapCache<Object, Object> mc = rs.getMapCache(a[1]);
+                reply(map("value", mc.get(OM.readValue(a[2], Object.class))));
+            }
+
+            case "dq_offer" -> {
+                RBlockingQueue<Object> target = rs.getBlockingQueue(a[1]);
+                RDelayedQueue<Object> dq = rs.getDelayedQueue(target);
+                dq.offer(OM.readValue(a[2], Object.class),
+                        Long.parseLong(a[3]), TimeUnit.MILLISECONDS);
+                reply(map("ok", true));
+            }
+            case "dq_peek" -> {
+                RBlockingQueue<Object> target = rs.getBlockingQueue(a[1]);
+                reply(map("value", target.peek()));
             }
 
             case "along_add" -> {
