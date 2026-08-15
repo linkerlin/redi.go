@@ -1,79 +1,63 @@
 package redi_test
 
 import (
-	"context"
 	"testing"
-
-	redi "github.com/linkerlin/redi.go"
 )
 
 func TestRAtomicLong(t *testing.T) {
-	if !redisAvailable(t) {
-		return
-	}
-	cfg := redi.DefaultConfig()
-	client, err := redi.NewClient(cfg)
-	if err != nil {
-		t.Fatal("NewClient:", err)
-	}
-	defer client.Close()
-
-	ctx := context.Background()
+	client := newTestClient(t)
 	a := client.GetRAtomicLong(uniqueKey(t, "atomic"))
-	// clean up
-	_ = a.Set(ctx, 0)
+	defer a.Delete(testCtx) //nolint:errcheck
 
-	// IncrementAndGet
-	val, err := a.IncrementAndGet(ctx)
-	if err != nil {
-		t.Fatal("IncrementAndGet:", err)
-	}
-	if val != 1 {
-		t.Errorf("IncrementAndGet = %d, want 1", val)
+	if _, err := a.Set(testCtx, 0); err != nil {
+		t.Fatal("Set:", err)
 	}
 
-	// AddAndGet
-	val, err = a.AddAndGet(ctx, 9)
-	if err != nil {
-		t.Fatal("AddAndGet:", err)
-	}
-	if val != 10 {
-		t.Errorf("AddAndGet(9) = %d, want 10", val)
+	val, err := a.IncrementAndGet(testCtx)
+	if err != nil || val != 1 {
+		t.Fatalf("IncrementAndGet = %d, %v; want 1", val, err)
 	}
 
-	// DecrementAndGet
-	val, err = a.DecrementAndGet(ctx)
-	if err != nil {
-		t.Fatal("DecrementAndGet:", err)
-	}
-	if val != 9 {
-		t.Errorf("DecrementAndGet = %d, want 9", val)
+	val, err = a.AddAndGet(testCtx, 9)
+	if err != nil || val != 10 {
+		t.Fatalf("AddAndGet(9) = %d, %v; want 10", val, err)
 	}
 
-	// CompareAndSet – should succeed
-	swapped, err := a.CompareAndSet(ctx, 9, 42)
-	if err != nil {
-		t.Fatal("CompareAndSet:", err)
-	}
-	if !swapped {
-		t.Error("CompareAndSet(9, 42): expected swap to succeed")
+	val, err = a.DecrementAndGet(testCtx)
+	if err != nil || val != 9 {
+		t.Fatalf("DecrementAndGet = %d, %v; want 9", val, err)
 	}
 
-	// CompareAndSet – should fail
-	swapped, err = a.CompareAndSet(ctx, 9, 99)
-	if err != nil {
-		t.Fatal("CompareAndSet:", err)
-	}
-	if swapped {
-		t.Error("CompareAndSet(9, 99): expected swap to fail (current is 42)")
+	swapped, err := a.CompareAndSet(testCtx, 9, 42)
+	if err != nil || !swapped {
+		t.Fatalf("CompareAndSet(9, 42) = %v, %v; want true", swapped, err)
 	}
 
-	// Get
-	val, err = a.Get(ctx)
-	if err != nil {
-		t.Fatal("Get:", err)
+	swapped, err = a.CompareAndSet(testCtx, 9, 99)
+	if err != nil || swapped {
+		t.Fatalf("CompareAndSet(9, 99) = %v, %v; want false", swapped, err)
 	}
-	if val != 42 {
-		t.Errorf("Get = %d, want 42", val)
+
+	val, err = a.Get(testCtx)
+	if err != nil || val != 42 {
+		t.Fatalf("Get = %d, %v; want 42", val, err)
+	}
+}
+
+// TestRAtomicLong_MissingKey verifies P0-6/7: missing key reads as 0 and
+// CAS(expect=0) succeeds on a fresh key.
+func TestRAtomicLong_MissingKey(t *testing.T) {
+	client := newTestClient(t)
+	a := client.GetRAtomicLong(uniqueKey(t, "missing"))
+	defer a.Delete(testCtx) //nolint:errcheck
+
+	val, err := a.Get(testCtx)
+	if err != nil || val != 0 {
+		t.Fatalf("Get on missing = %d, %v; want 0", val, err)
+	}
+
+	swapped, err := a.CompareAndSet(testCtx, 0, 7)
+	if err != nil || !swapped {
+		t.Fatalf("CAS(0,7) on missing = %v, %v; want true", swapped, err)
 	}
 }

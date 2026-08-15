@@ -6,8 +6,7 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/linkerlin/GoExecutors v0.0.0-20260815112114-cb244f200317
-	github.com/linkerlin/gotrycatch v1.3.0
+	github.com/minio/highwayhash v1.0.4
 	github.com/redis/go-redis/v9 v9.22.0
 )
 
