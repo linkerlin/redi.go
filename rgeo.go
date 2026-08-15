@@ -98,10 +98,10 @@ func (g *RGeo) Hash(ctx context.Context, member any) (string, error) {
 
 // GeoEntry is one search result.
 type GeoEntry struct {
-	Member    any
-	Lon, Lat  float64
-	Dist      float64
-	HasDist   bool
+	Member   any
+	Lon, Lat float64
+	Dist     float64
+	HasDist  bool
 }
 
 // Search returns members within radius of lon/lat (GEOSEARCH), optionally
