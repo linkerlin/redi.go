@@ -25,6 +25,7 @@
 | **RIdGenerator** | ID 生成器（批量分配缓存） |
 | **RLexSortedSet** | 字典序集合（裸成员，Redisson 特例） |
 | **RTransferQueue** | 跨队列原子迁移（单 Lua） |
+| **RHyperLogLog / RGeo / RBitSet** | 基数估计（PFADD/PFCOUNT）/ 地理索引（GEOSEARCH，Redis 8 兼容）/ 分布式位图（Java 原生位序） |
 | **RKeys / RBuckets / RScript** | 键空间管理（SCAN/模式删除）/ 批量桶（MSET/MGET）/ Lua 脚本执行 |
 | **RBatch** | 管道批处理（`NewBatch()` → 结构写操作入队 → `Execute()` 单次往返，实测 **~7x** 加速） |
 | **多拓扑** | single / cluster / sentinel（redis.UniversalClient） |

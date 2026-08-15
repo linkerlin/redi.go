@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.2 (2026-08-15)
+
+- **RHyperLogLog**：PFADD/PFCOUNT/PFMERGE + 联合计数/合并
+- **RGeo**：GEOADD/GEOSEARCH/GEOPOS/GEODIST/GEOHASH + TryAdd（Lua 原子 NX；GEOSEARCH 替代 Redis 8 已移除的 GEORADIUS）
+- **RBitSet**：原生位序（Java RedissonBitSet 一致，源码验证 toByteArray `1<<(7-i%8)`，无 redi.py 的位反转错误）；Length/Cardinality/BITOP And/Or/Xor/Not + 字节数组往返
+- Java 互操作 14 → **17 组**（HLL 混合计数、Geo 双向 pos/dist、BitSet 双向位与 length）
+- 规避 go-redis 坑：GeoSearchLocation 无 WITH* 标志时解析崩溃 → 恒带 WITHCOORD
+
+## v0.2.1 (2026-08-15)
+
+- **Java 直接互操作扩到 14 组用例**（新增 RWLock / RList / RScoredSortedSet / RLexSortedSet / RBucket / RMapCache / RDelayedQueue 双向）
+- **RDelayedQueue 按 Redisson 4.6.1 真实布局重写**（Java 实测发现 redi.py 为旧格式）：`redisson_delay_queue_timeout:{name}` ZSET + `redisson_delay_queue:{name}` LIST 双结构、`Bc0Lc0` struct-packed member（长度前缀**小端 8 字节**）、原版迁移 Lua（unpack→RPUSH+LREM+ZREM）；Java↔Go 双向迁移实测通过
+
 ## v0.2.0 (2026-08-15) — 全面演进：正确性 + 互操作 + 扩面
 
 ### 破坏性变更
@@ -72,7 +85,7 @@ RReadWriteLock、RSemaphore、RCountDownLatch、RRateLimiter、RDelayedQueue、R
 - **Dashboard 三页签**：INFO（服务器指标）/ Locks（持锁者、重入计数×N、TTL，`Run(client.Redis(), patterns...)` 指定扫描范围）/ Limiters（限流器 rate/interval/剩余许可）；`1/2/3` 或 `←/→` 切换
 - dashboard 首次引入单元测试（parseInfo/buildRows/buildLockRows/buildLimiterRows/formatHolders）
 
-### 追加（同日第八轮）
+### 追加（同日第八轮，= v0.2.1）
 - **Java 直接互操作扩到 14 组用例**（新增 RWLock / RList / RScoredSortedSet / RLexSortedSet / RBucket / RMapCache / RDelayedQueue 双向）
 - **RDelayedQueue 按 Redisson 4.6.1 真实布局重写**（Java 实测发现 redi.py 为旧格式）：`redisson_delay_queue_timeout:{name}` ZSET + `redisson_delay_queue:{name}` LIST 双结构、`Bc0Lc0` struct-packed member（长度前缀**小端 8 字节**）、原版迁移 Lua（unpack→RPUSH+LREM+ZREM）；Java↔Go 双向迁移实测通过
 

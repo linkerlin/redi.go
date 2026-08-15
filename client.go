@@ -269,6 +269,17 @@ func (c *Client) GetLexSortedSet(name string) *RLexSortedSet {
 	return newRLexSortedSet(c, name)
 }
 
+// GetHyperLogLog returns a cardinality estimator (PFADD/PFCOUNT).
+func (c *Client) GetHyperLogLog(name string) *RHyperLogLog {
+	return newRHyperLogLog(c, name)
+}
+
+// GetGeo returns a geospatial index (GEOADD/GEOSEARCH).
+func (c *Client) GetGeo(name string) *RGeo { return newRGeo(c, name) }
+
+// GetBitSet returns a distributed bitset (raw Redis bit numbering).
+func (c *Client) GetBitSet(name string) *RBitSet { return newRBitSet(c, name) }
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)

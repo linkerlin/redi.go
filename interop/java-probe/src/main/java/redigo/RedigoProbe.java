@@ -210,6 +210,54 @@ public final class RedigoProbe {
                 reply(map("value", target.peek()));
             }
 
+            case "hll_add" -> {
+                org.redisson.api.RHyperLogLog<Object> hll = rs.getHyperLogLog(a[1]);
+                reply(map("ok", hll.add(OM.readValue(a[2], Object.class))));
+            }
+            case "hll_count" -> {
+                org.redisson.api.RHyperLogLog<Object> hll = rs.getHyperLogLog(a[1]);
+                reply(map("count", hll.count()));
+            }
+
+            case "geo_add" -> {
+                org.redisson.api.RGeo<Object> geo = rs.getGeo(a[1]);
+                reply(map("ok", geo.add(Double.parseDouble(a[2]), Double.parseDouble(a[3]),
+                        OM.readValue(a[4], Object.class)) > 0));
+            }
+            case "geo_dist" -> {
+                org.redisson.api.RGeo<Object> geo = rs.getGeo(a[1]);
+                reply(map("value", geo.dist(OM.readValue(a[2], Object.class),
+                        OM.readValue(a[3], Object.class),
+                        org.redisson.api.geo.GeoUnit.valueOf(a[4]))));
+            }
+            case "geo_pos" -> {
+                org.redisson.api.RGeo<Object> geo = rs.getGeo(a[1]);
+                org.redisson.api.geo.GeoPosition p =
+                        geo.pos(OM.readValue(a[2], Object.class)).values().iterator().next();
+                Map<String, Object> out = new HashMap<>();
+                out.put("lon", p.getLongitude());
+                out.put("lat", p.getLatitude());
+                reply(out);
+            }
+
+            case "bitset_set" -> {
+                org.redisson.api.RBitSet bs = rs.getBitSet(a[1]);
+                bs.set(Long.parseLong(a[2]));
+                reply(map("ok", true));
+            }
+            case "bitset_get" -> {
+                org.redisson.api.RBitSet bs = rs.getBitSet(a[1]);
+                reply(map("value", bs.get(Long.parseLong(a[2]))));
+            }
+            case "bitset_cardinality" -> {
+                org.redisson.api.RBitSet bs = rs.getBitSet(a[1]);
+                reply(map("value", bs.cardinality()));
+            }
+            case "bitset_length" -> {
+                org.redisson.api.RBitSet bs = rs.getBitSet(a[1]);
+                reply(map("value", bs.length()));
+            }
+
             case "along_add" -> {
                 RAtomicLong al = rs.getAtomicLong(a[1]);
                 reply(map("value", al.addAndGet(Long.parseLong(a[2]))));
