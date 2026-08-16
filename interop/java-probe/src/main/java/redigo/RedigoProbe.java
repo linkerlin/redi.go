@@ -43,6 +43,7 @@ public final class RedigoProbe {
     private static RLock heldLock;
     private static RReadWriteLock heldRwLock;
     private static String heldPermit;
+    private static org.redisson.api.RLongAdder heldAdder;
     private static final java.util.concurrent.BlockingQueue<
             java.util.concurrent.BlockingQueue<Object>> reliableMsgs =
             new java.util.concurrent.LinkedBlockingQueue<>();
@@ -79,6 +80,9 @@ public final class RedigoProbe {
         }
         if (heldRwLock != null && heldRwLock.writeLock().isHeldByCurrentThread()) {
             heldRwLock.writeLock().unlock();
+        }
+        if (heldAdder != null) {
+            heldAdder.destroy();
         }
         rs.shutdown();
     }
@@ -353,6 +357,24 @@ public final class RedigoProbe {
                 } else {
                     Object m = q.poll(4, java.util.concurrent.TimeUnit.SECONDS);
                     reply(map("value", m));
+                }
+            }
+
+            case "adder_create" -> {
+                heldAdder = rs.getLongAdder(a[1]);
+                reply(map("ok", true));
+            }
+            case "adder_add" -> {
+                if (heldAdder != null) {
+                    heldAdder.add(Long.parseLong(a[2]));
+                }
+                reply(map("ok", true));
+            }
+            case "adder_sum" -> {
+                if (heldAdder == null) {
+                    reply(map("error", "no adder"));
+                } else {
+                    reply(map("value", heldAdder.sum()));
                 }
             }
 

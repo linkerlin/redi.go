@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go`；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，21 组用例全过）**。
+> Go 侧契约测试：`wire_compat_test.go`；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，22 组用例全过）**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -49,6 +49,7 @@
 | RReliableTopic | STREAM `{name}`（XADD field **`m`**）+ **每订阅者独立消费组**（组名=subscriberId，Java 语义：各组收全量；redi.py 单组多 consumer 实为负载均衡，语义错误）+ ZSET `{name}:timeout` 活性（watchdog/3 刷新）；回调返回后才 XACK（崩溃重投递） | **Redisson 4.6.1 实测 ✅**（Go 发布→Java 监听收到；Go/Java 订阅组各收全量） |
 | RLocalCachedMap | 数据层 = RMap wire 格式（✅ 跨语言读写）；**失效广播为 Go 内部协议**（channel `{name}:inval`，JSON 消息）——Java 的 LocalCachedMapInvalidation（keyHash 二进制数组 + 更新日志 + Java 序列化对象）未复刻，Java 写入不会实时失效 Go 本地缓存（Go 读有 Redis 兜底） | 数据层 **Redisson 4.6.1 双向读写实测 ✅**；失效广播 Go↔Go ✅ / Java↔Go ❌（诚实标注） |
 | RPriorityQueue | ZSET（member=codec 编码元素，score=优先级，低分先出） | wire 层与 RScoredSortedSet 同族（Java 可按 ZSET 读取） |
+| RLongAdder / RDoubleAdder | Redisson BaseAdder 协议（源码复刻）：channel `{name}:adder-topic`（消息 `1:<id>`=SUM / `0:<id>`=CLEAR，明文）+ flush 目标 `{name}:{id}:counter`（INCRBY/INCRBYFLOAT）+ 栅栏 `{name}:{id}:semaphore`（publish 返回订阅数 n，请求者 acquire n 后 GETDEL 汇总）；请求者自身订阅并响应，非破坏性 Sum | **Redisson 4.6.1 跨语言实测 ✅**（Go 加 100 + Java 加 23 → 双方 Sum 均 123；再 +7 → 双方 130，非破坏） |
 | 嵌套复合值编码 | 递归类型包装（map→@class / slice→ArrayList 包装，任意深度） | **Redisson 4.6.1 深层嵌套（map>array>map>array）实测 ✅** |
 | RKeys | DBSIZE/SCAN 迭代/模式删除（Del/Unlink）/Copy/Type/FlushDB | 单元测试 ✅ |
 | RBuckets | MGET/MSET/MSETNX + 批量 TTL（pipeline） | 单元测试 ✅ |

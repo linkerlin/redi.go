@@ -306,6 +306,17 @@ func (c *Client) GetPriorityQueue(name string) *RPriorityQueue {
 	return newRPriorityQueue(c, name)
 }
 
+// GetLongAdder returns a high-contention distributed counter (local buffer
+// + coordinated flush on Sum).
+func (c *Client) GetLongAdder(name string) *RLongAdder {
+	return newRLongAdder(c, name)
+}
+
+// GetDoubleAdder returns the double variant of GetLongAdder.
+func (c *Client) GetDoubleAdder(name string) *RDoubleAdder {
+	return newRDoubleAdder(c, name)
+}
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)

@@ -29,6 +29,7 @@
 | **RPermitExpirableSemaphore / RReliableTopic** | 按许可独立租约过期的信号量 / Stream 可靠广播主题（每订阅者独立消费组 + 崩溃重投递） |
 | **RLocalCachedMap** | 近端缓存 Map（写穿 + 跨实例失效广播；数据层 RMap wire 格式，Java 可直读） |
 | **RPriorityQueue** | ZSET 优先级队列（低分先出） |
+| **RLongAdder / RDoubleAdder** | 高争用计数器：本地零网络累积，`Sum()` 跨实例（含 Java）协同 flush；非破坏性 |
 | **RKeys / RBuckets / RScript** | 键空间管理（SCAN/模式删除）/ 批量桶（MSET/MGET）/ Lua 脚本执行 |
 | **RBatch** | 管道批处理（`NewBatch()` → 结构写操作入队 → `Execute()` 单次往返，实测 **~7x** 加速） |
 | **多拓扑** | single / cluster / sentinel（redis.UniversalClient） |

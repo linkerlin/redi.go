@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.8 (2026-08-15)
+
+- **RLongAdder / RDoubleAdder**：高争用分布式计数器，源码复刻 Redisson BaseAdder 协议 —— Add 零网络本地缓冲；`Sum()` 发布 `1:<id>` 到 `{name}:adder-topic，各存活实例（**含 Java**）把本地总额 flush 进 `{name}:{id}:counter` 并释放 `{name}:{id}:semaphore` 栅栏，请求者收齐后 GETDEL 汇总（非破坏）；`Reset()` 广播 `0:<id>` 清全部缓冲
+- **Java 互操作 21 → 22 组**：Go+Java 各持本地缓冲，任一方 Sum 收齐双方写入（100+23=123；+7→130 双向一致）
+- 修复两个订阅生命周期 bug：就绪等待与消费流双消费者竞态（吞首条消息）；`PubSub.Receive` 不响应 ctx 取消导致 Destroy 死锁（owner 主动 Close 再 Wait）
+- **AGENTS.md**：仓库协作约定（铁律/流程/测试约定/不做清单），沉淀全部踩坑经验
+- 修复 example 自清理漏 companion 键（rate limiter 窗口跨运行残留）
+
 ## v0.2.7 (2026-08-15) — 限流器双重正确性修复 + 工程质量
 
 ### 修复（RRateLimiter，生产级隐患）

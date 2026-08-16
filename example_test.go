@@ -103,9 +103,9 @@ func ExampleRRateLimiter() {
 	ctx := context.Background()
 
 	// Config is persisted in Redis: every process sharing the name
-	// shares the same sliding window. (Self-cleanup keeps the example
-	// re-runnable.)
-	_, _ = client.GetKeys().Delete(ctx, "demo:api")
+	// shares the same sliding window. (Self-cleanup INCLUDING the
+	// companion keys keeps the example re-runnable.)
+	_, _ = client.GetKeys().Delete(ctx, "demo:api", "{demo:api}:value", "{demo:api}:permits")
 	rl := client.GetRateLimiter("demo:api")
 	_, _ = rl.TrySetRate(ctx, redi.RateTypeOverall, 2, time.Minute)
 
