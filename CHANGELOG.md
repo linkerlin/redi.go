@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.5 (2026-08-15)
+
+- **RLocalCachedMap**：近端缓存 Map —— 本地命中零往返、写穿 Redis、Put/Remove/Clear 跨实例失效广播（channel `{name}:inval`，Go 内部协议）、本地容量上限（`SetLocalCacheLimit`）、`ClearLocalCache`/`CachedKeys`/`Destroy`
+- 数据层完全 RMap wire 格式（Java 双向读写实测）；Java 失效协议（keyHash 二进制 + 更新日志 + Java 序列化）未复刻，COMPATIBILITY 诚实标注
+- 修复同 client 多实例 instanceID 冲突（加实例级随机后缀）
+
 ## v0.2.4 (2026-08-15)
 
 - **RPermitExpirableSemaphore**：每许可独立租约/到期（STRING 计数 + ZSET `{name}:timeout` + `redisson_sc` 唤醒）；Acquire 阻塞唤醒、Release 验证、UpdateLeaseTime/LeaseTime；过期回收在 acquire 与读路径惰性执行（Lua 原子）

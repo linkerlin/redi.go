@@ -294,6 +294,12 @@ func (c *Client) GetReliableTopic(name string) *RReliableTopic {
 	return newRReliableTopic(c, name)
 }
 
+// GetLocalCachedMap returns a map with an in-process near cache
+// (write-through + cross-instance invalidation broadcast).
+func (c *Client) GetLocalCachedMap(name string) *RLocalCachedMap {
+	return newRLocalCachedMap(c, name)
+}
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)

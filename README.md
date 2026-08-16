@@ -27,6 +27,7 @@
 | **RTransferQueue** | 跨队列原子迁移（单 Lua） |
 | **RHyperLogLog / RGeo / RBitSet / RStream** | 基数估计 / 地理索引（GEOSEARCH）/ 分布式位图（Java 位序）/ 分布式日志（消费组、Pending、Claim/AutoClaim） |
 | **RPermitExpirableSemaphore / RReliableTopic** | 按许可独立租约过期的信号量 / Stream 可靠广播主题（每订阅者独立消费组 + 崩溃重投递） |
+| **RLocalCachedMap** | 近端缓存 Map（写穿 + 跨实例失效广播；数据层 RMap wire 格式，Java 可直读） |
 | **RKeys / RBuckets / RScript** | 键空间管理（SCAN/模式删除）/ 批量桶（MSET/MGET）/ Lua 脚本执行 |
 | **RBatch** | 管道批处理（`NewBatch()` → 结构写操作入队 → `Execute()` 单次往返，实测 **~7x** 加速） |
 | **多拓扑** | single / cluster / sentinel（redis.UniversalClient） |
