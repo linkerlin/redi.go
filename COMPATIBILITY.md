@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go`；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，18 组用例全过）**。
+> Go 侧契约测试：`wire_compat_test.go`；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，19 组用例全过）**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -45,6 +45,8 @@
 | RGeo | GEOADD/GEOSEARCH/GEOPOS/GEODIST（codec 编码成员；GEOSEARCH 非 GEORADIUS，Redis 8 兼容） | **Redisson 4.6.1 双向 pos/dist 实测 ✅** |
 | RBitSet | 原生 GETBIT/SETBIT 位序（与 Java RedissonBitSet 一致，无位反转；MSB-first 字节数组） | **Redisson 4.6.1 双向位/cardinality/length 实测 ✅** |
 | RStream | XADD/XRANGE/XREADGROUP/XPENDING/XACK/XCLAIM/XAUTOCLAIM；field 名与值均 codec 编码（Redisson RStream 同款）；消费组为 Redis 原生 | **Redisson 4.6.1 双向实测 ✅**（Java 写→Go 组读、跨语言 Ack、Go 写→Java 新组读全史） |
+| RPermitExpirableSemaphore | STRING `{name}` 计数 + ZSET `{name}:timeout`（member=许可 ID，score=到期时刻）+ channel `redisson_sc:{name}`；过期回收在 acquire 与读路径惰性执行（Lua） | **Redisson 4.6.1 共享许可池实测 ✅**（Java 租借→Go 可见 0；Java 释放→Go 获取） |
+| RReliableTopic | STREAM `{name}`（XADD field **`m`**）+ **每订阅者独立消费组**（组名=subscriberId，Java 语义：各组收全量；redi.py 单组多 consumer 实为负载均衡，语义错误）+ ZSET `{name}:timeout` 活性（watchdog/3 刷新）；回调返回后才 XACK（崩溃重投递） | **Redisson 4.6.1 实测 ✅**（Go 发布→Java 监听收到；Go/Java 订阅组各收全量） |
 | RKeys | DBSIZE/SCAN 迭代/模式删除（Del/Unlink）/Copy/Type/FlushDB | 单元测试 ✅ |
 | RBuckets | MGET/MSET/MSETNX + 批量 TTL（pipeline） | 单元测试 ✅ |
 | RScript | EVAL/EVALSHA/ScriptLoad/ScriptExists + ReturnType 转换 | 单元测试 ✅ |

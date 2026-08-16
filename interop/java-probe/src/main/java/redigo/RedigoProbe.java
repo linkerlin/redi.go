@@ -42,6 +42,10 @@ public final class RedigoProbe {
     private static final ObjectMapper OM = new ObjectMapper();
     private static RLock heldLock;
     private static RReadWriteLock heldRwLock;
+    private static String heldPermit;
+    private static final java.util.concurrent.BlockingQueue<
+            java.util.concurrent.BlockingQueue<Object>> reliableMsgs =
+            new java.util.concurrent.LinkedBlockingQueue<>();
 
     public static void main(String[] args) throws Exception {
         org.redisson.config.Config cfg = new org.redisson.config.Config();
@@ -296,6 +300,60 @@ public final class RedigoProbe {
                 reply(map("value", st.ack(a[2],
                         new org.redisson.api.stream.StreamMessageId(
                                 Long.parseLong(parts[0]), Long.parseLong(parts[1])))));
+            }
+
+            case "pes_set" -> {
+                org.redisson.api.RPermitExpirableSemaphore pes =
+                        rs.getPermitExpirableSemaphore(a[1]);
+                reply(map("ok", pes.trySetPermits(Integer.parseInt(a[2]))));
+            }
+            case "pes_acquire" -> {
+                org.redisson.api.RPermitExpirableSemaphore pes =
+                        rs.getPermitExpirableSemaphore(a[1]);
+                String pid = null;
+                try {
+                    pid = pes.tryAcquire(100, 60000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                heldPermit = pid;
+                reply(map("permit", pid));
+            }
+            case "pes_release" -> {
+                org.redisson.api.RPermitExpirableSemaphore pes =
+                        rs.getPermitExpirableSemaphore(a[1]);
+                if (heldPermit != null) {
+                    pes.tryRelease(heldPermit);
+                }
+                heldPermit = null;
+                reply(map("released", true));
+            }
+            case "pes_available" -> {
+                org.redisson.api.RPermitExpirableSemaphore pes =
+                        rs.getPermitExpirableSemaphore(a[1]);
+                reply(map("value", pes.availablePermits()));
+            }
+
+            case "rtopic_publish" -> {
+                org.redisson.api.RReliableTopic topic = rs.getReliableTopic(a[1]);
+                reply(map("subscribers", topic.publish(OM.readValue(a[2], Object.class))));
+            }
+            case "rtopic_listen" -> {
+                org.redisson.api.RReliableTopic topic = rs.getReliableTopic(a[1]);
+                java.util.concurrent.BlockingQueue<Object> q = new java.util.concurrent.LinkedBlockingQueue<>();
+                // ponytail: raw Object type - the probe only echoes messages
+                topic.addListener(Object.class, (org.redisson.api.listener.MessageListener<Object>) (channel, msg) -> q.add(msg));
+                reliableMsgs.offer(q);
+                reply(map("ok", true));
+            }
+            case "rtopic_collect" -> {
+                java.util.concurrent.BlockingQueue<Object> q = reliableMsgs.poll();
+                if (q == null) {
+                    reply(map("value", null));
+                } else {
+                    Object m = q.poll(4, java.util.concurrent.TimeUnit.SECONDS);
+                    reply(map("value", m));
+                }
             }
 
             case "along_add" -> {

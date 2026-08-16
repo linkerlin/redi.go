@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.4 (2026-08-15)
+
+- **RPermitExpirableSemaphore**：每许可独立租约/到期（STRING 计数 + ZSET `{name}:timeout` + `redisson_sc` 唤醒）；Acquire 阻塞唤醒、Release 验证、UpdateLeaseTime/LeaseTime；过期回收在 acquire 与读路径惰性执行（Lua 原子）
+- **RReliableTopic**：Stream 可靠主题 —— 源码验证 Redisson 语义为**每订阅者独立消费组**（广播；redi.py 单组多 consumer 实为负载均衡）、XADD field `m`、回调返回后才 XACK（崩溃重投递）、`{name}:timeout` 活性 zset + watchdog/3 刷新、晚订阅者从头重放
+- Java 互操作 18 → **19 组**（PES：Java 租借/释放 ↔ Go 可见/获取共享池；ReliableTopic：Go 发布 → Java 监听收到 + 双语订阅组各收全量）
+- 修复：`ZAddXX` 返回新增计数而非更新成功（UpdateLeaseTime 误判）
+
 ## v0.2.3 (2026-08-15)
 
 - **RStream**：Redis Stream 全家 —— Add（含 MAXLEN 裁剪）/ReadRange/ReadReverse/Len/Trim(MAXLEN+MINID)/Remove/CreateGroup(BUSYGROUP 幂等)/DeleteGroup/CreateConsumer/RemoveConsumer/ReadGroup/PendingRange/Ack/Claim/AutoClaim；field 名与值均 codec 编码（Redisson RStream 同款）

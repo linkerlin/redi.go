@@ -283,6 +283,17 @@ func (c *Client) GetBitSet(name string) *RBitSet { return newRBitSet(c, name) }
 // GetStream returns a distributed log stream (Redis Stream).
 func (c *Client) GetStream(name string) *RStream { return newRStream(c, name) }
 
+// GetPermitExpirableSemaphore returns a semaphore with individually leased,
+// self-expiring permits.
+func (c *Client) GetPermitExpirableSemaphore(name string) *RPermitExpirableSemaphore {
+	return newRPermitExpirableSemaphore(c, name)
+}
+
+// GetReliableTopic returns a reliable (Stream-backed) pub/sub topic.
+func (c *Client) GetReliableTopic(name string) *RReliableTopic {
+	return newRReliableTopic(c, name)
+}
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)
