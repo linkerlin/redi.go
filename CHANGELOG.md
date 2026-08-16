@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.11 (2026-08-15)
+
+- **RTimeSeries**：时间序列（源码复刻 RedissonTimeSeries）—— 序列号 member（`redisson__ts_seq` 零填充 20 位，同刻多条目共存）、每条目 TTL（TTL 分支 score=截止时刻 vs 无 TTL 分支 now+100 年 +1，两个 Lua 变体）、label mark 字节（2/3）、Get/Range 惰性过滤过期、Size=ZCARD−过期（Java 同款惰性计数）、Remove/Delete
+- **Java 互操作 22 → 23 组**：Go 写 → Java 精确时间戳读回；Java 写 → Go Range 解码 + 双方 size 一致
+- wire 细节修正（对照 Java 源码）：`struct.unpack('BBc0Lc0Lc0')` 首返回值是外层 type 字节（4），label mark 在 label blob 首字节（Java 用 DECODE_LABEL 剥离，Go 在 Lua 内切片）
+
 ## v0.2.10 (2026-08-15)
 
 - **RFencedLock**：栅栏令牌锁（源码复刻 RedissonFencedLock）—— `redisson_lock_token:{name}` 计数器，acquire Lua 原版（**重入也 INCR**，成功返回 token）；`TryLockAndGetToken`/`LockAndGetToken`（阻塞，pub/sub 唤醒）/`GetToken`；防锁过期脑裂的 fencing 模式

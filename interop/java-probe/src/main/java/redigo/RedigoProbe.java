@@ -378,6 +378,20 @@ public final class RedigoProbe {
                 }
             }
 
+            case "ts_add" -> {
+                org.redisson.api.RTimeSeries<Object, Object> ts = rs.getTimeSeries(a[1]);
+                ts.add(Long.parseLong(a[2]), OM.readValue(a[3], Object.class));
+                reply(map("ok", true));
+            }
+            case "ts_get" -> {
+                org.redisson.api.RTimeSeries<Object, Object> ts = rs.getTimeSeries(a[1]);
+                reply(map("value", ts.get(Long.parseLong(a[2]))));
+            }
+            case "ts_range_size" -> {
+                org.redisson.api.RTimeSeries<Object, Object> ts = rs.getTimeSeries(a[1]);
+                reply(map("value", ts.size()));
+            }
+
             case "along_add" -> {
                 RAtomicLong al = rs.getAtomicLong(a[1]);
                 reply(map("value", al.addAndGet(Long.parseLong(a[2]))));

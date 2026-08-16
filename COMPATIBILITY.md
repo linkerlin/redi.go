@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go`（**17 组，覆盖所有互操作结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，22 组用例全过）**。
+> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go`（**17 组，覆盖所有互操作结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，23 组用例全过）**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -52,6 +52,7 @@
 | RLongAdder / RDoubleAdder | Redisson BaseAdder 协议（源码复刻）：channel `{name}:adder-topic`（消息 `1:<id>`=SUM / `0:<id>`=CLEAR，明文）+ flush 目标 `{name}:{id}:counter`（INCRBY/INCRBYFLOAT）+ 栅栏 `{name}:{id}:semaphore`（publish 返回订阅数 n，请求者 acquire n 后 GETDEL 汇总）；请求者自身订阅并响应，非破坏性 Sum | **Redisson 4.6.1 跨语言实测 ✅**（Go 加 100 + Java 加 23 → 双方 Sum 均 123；再 +7 → 双方 130，非破坏） |
 | RFencedLock | RLock 布局 + `redisson_lock_token:{name}` 计数器；acquire Lua 同 Redisson 原版（`INCR` token —— **重入也递增**；成功返回 `{-1,token}`）；GetToken 为十进制 GET（StringCodec） | wire 契约测试 ✅（token key 名 + 十进制格式） |
 | RMultiLock | 纯客户端编排（成员即普通 RLock） | 单元测试 ✅（全有或全无 + 失败回滚） |
+| RTimeSeries | 源码复刻：ZSET `{name}`（score=时间戳，member=`struct.pack('BBc0Lc0Lc0',4,idLen,id,valLen,val,lblLen,lbl)`，id 来自 `redisson__ts_seq:{name}` 零填充 20 位序列）+ 过期 ZSET `redisson__ts_ttl:{name}`（TTL 分支 score=截止时刻；无 TTL 分支=now+100 年取 max 再 +1）；label blob=mark 字节(2 无/3 有)+label；Size=ZCARD−过期（惰性） | **Redisson 4.6.1 双向实测 ✅**（Go 写→Java 精确时间戳读回；Java 写→Go Range 解码 + size 一致） |
 | 嵌套复合值编码 | 递归类型包装（map→@class / slice→ArrayList 包装，任意深度） | **Redisson 4.6.1 深层嵌套（map>array>map>array）实测 ✅** |
 | RKeys | DBSIZE/SCAN 迭代/模式删除（Del/Unlink）/Copy/Type/FlushDB | 单元测试 ✅ |
 | RBuckets | MGET/MSET/MSETNX + 批量 TTL（pipeline） | 单元测试 ✅ |

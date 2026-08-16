@@ -328,6 +328,11 @@ func (c *Client) NewMultiLock(locks ...*RLock) *RMultiLock {
 	return &RMultiLock{locks: locks}
 }
 
+// GetTimeSeries returns a time-series store (Redisson wire-compatible).
+func (c *Client) GetTimeSeries(name string) *RTimeSeries {
+	return newRTimeSeries(c, name)
+}
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)
