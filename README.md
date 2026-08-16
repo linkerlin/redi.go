@@ -30,6 +30,7 @@
 | **RLocalCachedMap** | 近端缓存 Map（写穿 + 跨实例失效广播；数据层 RMap wire 格式，Java 可直读） |
 | **RPriorityQueue** | ZSET 优先级队列（低分先出） |
 | **RLongAdder / RDoubleAdder** | 高争用计数器：本地零网络累积，`Sum()` 跨实例（含 Java）协同 flush；非破坏性 |
+| **RFencedLock / RMultiLock** | 栅栏令牌锁（每次获取 INCR token，防锁过期脑裂）/ 多锁全有或全无（失败回滚） |
 | **RKeys / RBuckets / RScript** | 键空间管理（SCAN/模式删除）/ 批量桶（MSET/MGET）/ Lua 脚本执行 |
 | **RBatch** | 管道批处理（`NewBatch()` → 结构写操作入队 → `Execute()` 单次往返，实测 **~7x** 加速） |
 | **多拓扑** | single / cluster / sentinel（redis.UniversalClient） |

@@ -317,6 +317,17 @@ func (c *Client) GetDoubleAdder(name string) *RDoubleAdder {
 	return newRDoubleAdder(c, name)
 }
 
+// GetFencedLock returns a re-entrant lock whose acquisitions increment a
+// fencing token (redisson_lock_token:{name}).
+func (c *Client) GetFencedLock(name string) *RFencedLock {
+	return newRFencedLock(c, name)
+}
+
+// NewMultiLock groups RLocks into one all-or-nothing lock.
+func (c *Client) NewMultiLock(locks ...*RLock) *RMultiLock {
+	return &RMultiLock{locks: locks}
+}
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)

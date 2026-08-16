@@ -48,5 +48,6 @@ go test -bench . -benchtime 1s -run XXX_none .   # 基准
 ## 已知不做（勿重复提案）
 
 - RSortedSet（LIST+Comparator 版）—— 勿用 ZSET 冒充。
+- RTransaction —— Redisson 为快照回滚语义（operation log + 回滚），非 MULTI/EXEC 原子提交；勿用 TxPipeline 冒充。
 - Java LocalCachedMapInvalidation 二进制失效协议（keyHash + 更新日志 + Java 序列化）—— Go 失效广播为内部协议，COMPATIBILITY 已标注。
 - reactive/RxJava 范式、手写连接池、RExecutorService/RRemoteService 的 Java 互操作。

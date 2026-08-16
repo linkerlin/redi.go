@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.10 (2026-08-15)
+
+- **RFencedLock**：栅栏令牌锁（源码复刻 RedissonFencedLock）—— `redisson_lock_token:{name}` 计数器，acquire Lua 原版（**重入也 INCR**，成功返回 token）；`TryLockAndGetToken`/`LockAndGetToken`（阻塞，pub/sub 唤醒）/`GetToken`；防锁过期脑裂的 fencing 模式
+- **RMultiLock**：多锁全有或全无（RedissonMultiLock 编排）—— 顺序获取、等待预算、失败自动回滚已获取成员
+- wire 契约 16 → **17 组**（FencedLock token key + 十进制格式）
+- 决策记录：Redisson RTransaction 为快照回滚语义（非 MULTI/EXEC），不冒充实现（AGENTS.md 不做清单）
+
 ## v0.2.9 (2026-08-15)
 
 - **wire 契约测试补齐至 16 组**（`wire_compat2_test.go`）：RWLock（mode 字段 + `{id}:write` 后缀）、Semaphore/Latch（裸名计数器 + 字面 channel 名 + 归零消息 "0"）、PermitExpirableSemaphore（`{name}:timeout` zset + 绝对到期 score）、RStream（field 名与值双 codec 编码）、ReliableTopic（field `m` + 每订阅者独立组 + timeout 活性）、LongAdder（topic/counter/semaphore 伴生键协同实测）、BitSet（MSB-first 原始字节）、LocalCachedMap（数据层 = RMap 格式）
