@@ -3,7 +3,9 @@ package redi
 import (
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
+	"time"
 )
 
 // Codec encodes and decodes values stored in Redis, mirroring Redisson's
@@ -29,24 +31,55 @@ func (JSONCodec) Encode(v any) (string, error) {
 	if s, ok := longWrap(v); ok {
 		return s, nil
 	}
+	if !needsTypeWrap(v) {
+		// Scalars (string/int/float/bool/ptr-to-scalar...) marshal once.
+		b, err := json.Marshal(v)
+		return string(b), err
+	}
+	// Compound values need Java type ids for JsonJacksonCodec's default
+	// typing (verified against Redisson 4.6.1: reading a bare JSON object
+	// throws "missing type id"). Mirrors what Redisson itself writes:
+	// maps get "@class":"java.util.LinkedHashMap", lists are wrapped as
+	// ["java.util.ArrayList",[...]] — the two shapes redi.py's decoder strips.
 	b, err := json.Marshal(v)
 	if err != nil {
 		return "", err
 	}
-	// Non-final compound types need Java type ids for JsonJacksonCodec's
-	// default typing (verified against Redisson 4.6.1: reading a bare JSON
-	// object throws "missing type id"). Mirrors what Redisson itself writes:
-	// maps get "@class":"java.util.LinkedHashMap", lists are wrapped as
-	// ["java.util.ArrayList",[...]] — the two shapes redi.py's decoder strips.
 	var generic any
 	if err := json.Unmarshal(b, &generic); err != nil {
-		return string(b), nil // scalar bytes, nothing to type
+		return string(b), nil
 	}
 	out, err := json.Marshal(javaTypeWrap(generic))
 	if err != nil {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// needsTypeWrap reports whether v marshals to a bare JSON object/array
+// (the shapes Java default typing rejects).
+func needsTypeWrap(v any) bool {
+	switch v.(type) {
+	case string, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		uintptr, float32, float64, nil,
+		*time.Time:
+		return false
+	}
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return false
+	}
+	switch rv.Kind() {
+	case reflect.Bool, reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return false
+	default:
+		return true
+	}
 }
 
 // javaTypeWrap recursively attaches Java type ids to non-final compound

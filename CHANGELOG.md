@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.6 (2026-08-15)
+
+- **Codec Encode 快路径**：标量（string/int/float/bool）单次序列化直达，不再走 marshal→unmarshal→rewrap 三段管线（基准：字符串 103ns、int 63ns，原均 ~2.4µs，**~25x**）；复合值仍递归类型包装
+- **嵌套 wire 实测**：深层复合结构（map>array>map>array 任意深度递归 @class/ArrayList 包装）经真实 Redisson 4.6.1 读取验证（第 21 组 Java 互操作用例）
+- **RPriorityQueue**：ZSET 优先级队列（Offer 带分数/Poll 低分先出/Peek/PeekScore/Remove）
+
 ## v0.2.5 (2026-08-15)
 
 - **RLocalCachedMap**：近端缓存 Map —— 本地命中零往返、写穿 Redis、Put/Remove/Clear 跨实例失效广播（channel `{name}:inval`，Go 内部协议）、本地容量上限（`SetLocalCacheLimit`）、`ClearLocalCache`/`CachedKeys`/`Destroy`

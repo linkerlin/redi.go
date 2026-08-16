@@ -300,6 +300,12 @@ func (c *Client) GetLocalCachedMap(name string) *RLocalCachedMap {
 	return newRLocalCachedMap(c, name)
 }
 
+// GetPriorityQueue returns a ZSET-backed priority queue (lower score =
+// higher priority).
+func (c *Client) GetPriorityQueue(name string) *RPriorityQueue {
+	return newRPriorityQueue(c, name)
+}
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)
