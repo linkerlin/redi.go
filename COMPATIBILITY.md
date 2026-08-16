@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go`；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，22 组用例全过）**。
+> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go`（**16 组，覆盖所有互操作结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归：`interop_java_test.go` + `interop_java2_test.go`（单 JVM REPL 探针 `interop/java-probe/`，22 组用例全过）**。
 
 ## 重要 wire 事实（Java 实测）
 

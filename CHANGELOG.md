@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.9 (2026-08-15)
+
+- **wire 契约测试补齐至 16 组**（`wire_compat2_test.go`）：RWLock（mode 字段 + `{id}:write` 后缀）、Semaphore/Latch（裸名计数器 + 字面 channel 名 + 归零消息 "0"）、PermitExpirableSemaphore（`{name}:timeout` zset + 绝对到期 score）、RStream（field 名与值双 codec 编码）、ReliableTopic（field `m` + 每订阅者独立组 + timeout 活性）、LongAdder（topic/counter/semaphore 伴生键协同实测）、BitSet（MSB-first 原始字节）、LocalCachedMap（数据层 = RMap 格式）
+- 动机：Java 互操作测试在 CI（无 JVM）skip，契约测试是 CI 上唯一的 wire 防线
+- 修复测试竞态：pub/sub 断言前先消费订阅 ack（发布不得先于订阅注册）
+
 ## v0.2.8 (2026-08-15)
 
 - **RLongAdder / RDoubleAdder**：高争用分布式计数器，源码复刻 Redisson BaseAdder 协议 —— Add 零网络本地缓冲；`Sum()` 发布 `1:<id>` 到 `{name}:adder-topic，各存活实例（**含 Java**）把本地总额 flush 进 `{name}:{id}:counter` 并释放 `{name}:{id}:semaphore` 栅栏，请求者收齐后 GETDEL 汇总（非破坏）；`Reset()` 广播 `0:<id>` 清全部缓冲
