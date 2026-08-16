@@ -77,7 +77,7 @@ func TestRLock_Watchdog(t *testing.T) {
 	if err != nil {
 		t.Skip("Redis not available:", err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 
 	l := client.GetRLock(uniqueKey(t, "watchdog"))
 	if err := l.Lock(testCtx, "holder", 0); err != nil { // 0 → watchdog
@@ -106,7 +106,7 @@ func TestRLock_WrongOwnerUnlockKeepsRenewal(t *testing.T) {
 	if err != nil {
 		t.Skip("Redis not available:", err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 
 	l := client.GetRLock(uniqueKey(t, "c3"))
 	if err := l.Lock(testCtx, "holder", 0); err != nil {

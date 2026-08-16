@@ -2,7 +2,7 @@ package redi
 
 import (
 	"context"
-	"encoding/hex"
+	"crypto/rand"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -37,6 +37,11 @@ func newRRateLimiter(c *Client, name string) *RRateLimiter {
 	return &RRateLimiter{rObject: rObject{c: c, name: name}}
 }
 
+// rateAcquireScript mirrors Redisson 4.6.1's RedissonRateLimiter Lua:
+// members are struct.pack('Bc0I', len(id), id, permits) and expired ones
+// are returned to the pool via struct.unpack. (The manual byte-math variant
+// ported from redi.py read the permits tail big-endian while writing it
+// little-endian — every expired permit released 16777216 instead of 1.)
 var rateAcquireScript = redis.NewScript(`
 local now = tonumber(ARGV[1])
 local interval = tonumber(ARGV[2])
@@ -46,11 +51,8 @@ local permits = tonumber(ARGV[5])
 local expired = redis.call('zrangebyscore', KEYS[2], 0, now - interval)
 local returned = 0
 for i = 1, #expired do
-    local m = expired[i]
-    returned = returned + string.byte(m, #m)
-        + string.byte(m, #m - 1) * 256
-        + string.byte(m, #m - 2) * 65536
-        + string.byte(m, #m - 3) * 16777216
+    local rnd, p = struct.unpack('Bc0I', expired[i])
+    returned = returned + p
 end
 if returned > 0 then
     redis.call('zremrangebyscore', KEYS[2], 0, now - interval)
@@ -64,11 +66,7 @@ else
 end
 
 if value >= permits then
-    local b0 = permits % 256
-    local b1 = math.floor(permits / 256) % 256
-    local b2 = math.floor(permits / 65536) % 256
-    local b3 = math.floor(permits / 16777216) % 256
-    local member = string.char(16) .. ARGV[4] .. string.char(b0, b1, b2, b3)
+    local member = struct.pack('Bc0I', string.len(ARGV[4]), ARGV[4], permits)
     redis.call('zadd', KEYS[2], now, member)
     redis.call('set', KEYS[1], value - permits)
     redis.call('pexpire', KEYS[2], interval * 2)
@@ -149,9 +147,16 @@ func (r *RRateLimiter) TryAcquire(ctx context.Context, permits int64) (bool, err
 	if err != nil {
 		return false, err
 	}
+	// Fresh random id per acquire (Java's generateIdArray() = 16 bytes): a
+	// fixed id would make struct.pack produce identical members and ZADD
+	// would collapse repeated acquires into one zset entry.
+	acquireID := make([]byte, 16)
+	if _, err := rand.Read(acquireID); err != nil {
+		return false, err
+	}
 	n, err := rateAcquireScript.Run(ctx, r.rc(),
 		[]string{r.valueKey(), r.permitsKey()},
-		now, r.interval, r.rate, r.c.idBytes(), permits).Int()
+		now, r.interval, r.rate, string(acquireID), permits).Int()
 	if err != nil {
 		return false, err
 	}
@@ -176,6 +181,26 @@ func (r *RRateLimiter) Acquire(ctx context.Context, permits int64) error {
 	}
 }
 
+// ratePurgeScript returns expired permits to the pool (shared by the
+// acquire path and AvailablePermits so reads never shrink the pool).
+var ratePurgeScript = redis.NewScript(`
+local expired = redis.call('zrangebyscore', KEYS[2], 0, tonumber(ARGV[1]) - tonumber(ARGV[2]))
+local returned = 0
+for i = 1, #expired do
+    local rnd, p = struct.unpack('Bc0I', expired[i])
+    returned = returned + p
+end
+if returned > 0 then
+    redis.call('zremrangebyscore', KEYS[2], 0, tonumber(ARGV[1]) - tonumber(ARGV[2]))
+    local value = redis.call('get', KEYS[1])
+    if value == false then
+        value = 0
+    end
+    redis.call('set', KEYS[1], tonumber(value) + returned)
+end
+return returned
+`)
+
 // AvailablePermits returns the permits currently available in the window.
 func (r *RRateLimiter) AvailablePermits(ctx context.Context) (int64, error) {
 	if err := r.ensureConfig(ctx); err != nil {
@@ -188,8 +213,10 @@ func (r *RRateLimiter) AvailablePermits(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := r.rc().ZRemRangeByScore(ctx, r.permitsKey(),
-		"0", formatFloat(float64(now-r.interval))).Err(); err != nil {
+	// Purge WITH return-to-pool: a bare ZRemRangeByScore would shrink the
+	// pool every time it ran.
+	if _, err := ratePurgeScript.Run(ctx, r.rc(),
+		[]string{r.valueKey(), r.permitsKey()}, now, r.interval).Int(); err != nil {
 		return 0, err
 	}
 	v, err := r.rc().Get(ctx, r.valueKey()).Result()
@@ -209,12 +236,4 @@ func (r *RRateLimiter) AvailablePermits(ctx context.Context) (int64, error) {
 // Delete removes config, value and permits keys.
 func (r *RRateLimiter) Delete(ctx context.Context) error {
 	return r.rc().Del(ctx, r.name, r.valueKey(), r.permitsKey()).Err()
-}
-
-// idBytes returns the 16 raw uuid bytes of the client id (rate limiter
-// member prefix payload).
-func (c *Client) idBytes() string {
-	b := make([]byte, 16)
-	_, _ = hex.Decode(b, []byte(c.id)) // id is always 32 hex chars
-	return string(b)
 }

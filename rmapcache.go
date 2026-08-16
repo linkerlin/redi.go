@@ -456,7 +456,7 @@ func (m *RMapCache) startListening() error {
 	m.subWG.Add(1)
 	go func() {
 		defer m.subWG.Done()
-		defer sub.Close() //nolint:errcheck
+		defer sub.Close() //nolint:errcheck // connection teardown //nolint:errcheck
 		for {
 			msg, err := sub.ReceiveMessage(m.c.ctx)
 			if err != nil {

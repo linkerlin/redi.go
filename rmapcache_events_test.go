@@ -97,7 +97,7 @@ func TestWire_MapCacheEventFormat(t *testing.T) {
 	sub := rc.Subscribe(testCtx,
 		"redisson_map_cache_created:{"+name+"}",
 		"redisson_map_cache_updated:{"+name+"}")
-	defer sub.Close()
+	defer sub.Close() //nolint:errcheck // connection teardown
 	if _, err := sub.ReceiveTimeout(testCtx, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestRReadWriteLock_Watchdog(t *testing.T) {
 	if err != nil {
 		t.Skip("Redis not available:", err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 
 	rw := client.GetReadWriteLock(uniqueKey(t, "rwwd"))
 	w := rw.WriteLock()

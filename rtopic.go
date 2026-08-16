@@ -93,7 +93,7 @@ func (t *RTopic) startListening() error {
 	t.stop = stop
 	go func() {
 		defer stop()
-		defer sub.Close() //nolint:errcheck
+		defer sub.Close() //nolint:errcheck // connection teardown //nolint:errcheck
 		for {
 			msg, err := sub.ReceiveMessage(ctx2)
 			if err != nil {
@@ -180,7 +180,7 @@ func (t *RPatternTopic) startListening() error {
 	t.stop = stop
 	go func() {
 		defer stop()
-		defer sub.Close() //nolint:errcheck
+		defer sub.Close() //nolint:errcheck // connection teardown //nolint:errcheck
 		for {
 			msg, err := sub.ReceiveMessage(ctx2)
 			if err != nil {

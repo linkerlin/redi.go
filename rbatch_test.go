@@ -92,7 +92,7 @@ func BenchmarkRMap_Put10_Sequential(b *testing.B) {
 	if err != nil {
 		b.Skip(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 	m := client.GetMap(uniqueKeyB(b, "seq"))
 	defer m.Clear(testCtx) //nolint:errcheck
 	b.ResetTimer()
@@ -108,7 +108,7 @@ func BenchmarkRMap_Put10_Batch(b *testing.B) {
 	if err != nil {
 		b.Skip(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 	name := uniqueKeyB(b, "bat")
 	defer client.GetMap(name).Clear(testCtx) //nolint:errcheck
 	b.ResetTimer()

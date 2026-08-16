@@ -109,7 +109,7 @@ func (s *RPermitExpirableSemaphore) Acquire(ctx context.Context, lease time.Dura
 		return pid, err
 	}
 	sub := s.subscribe(ctx, s.channel)
-	defer sub.Close()
+	defer sub.Close() //nolint:errcheck // connection teardown
 	wake := sub.Channel()
 	for {
 		select {

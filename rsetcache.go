@@ -82,7 +82,7 @@ func (s *RSetCache) Add(ctx context.Context, element any, ttl, maxIdle time.Dura
 	if err != nil {
 		return false, err
 	}
-	var expiry int64 = maxScore
+	expiry := maxScore
 	switch {
 	case ttl > 0 && maxIdle > 0:
 		if ttl < maxIdle {

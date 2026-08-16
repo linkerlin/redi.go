@@ -15,7 +15,7 @@ func BenchmarkRAtomicLong_Increment(b *testing.B) {
 	if err != nil {
 		b.Skip(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 	a := client.GetAtomicLong(uniqueKeyB(b, "along"))
 	defer a.Delete(testCtx) //nolint:errcheck
 	b.ResetTimer()
@@ -31,7 +31,7 @@ func BenchmarkRMap_PutGet(b *testing.B) {
 	if err != nil {
 		b.Skip(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 	m := client.GetMap(uniqueKeyB(b, "map"))
 	defer m.Clear(testCtx) //nolint:errcheck
 	b.ResetTimer()
@@ -50,7 +50,7 @@ func BenchmarkRLock_TryUnlock(b *testing.B) {
 	if err != nil {
 		b.Skip(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 	l := client.GetLock(uniqueKeyB(b, "lock"))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -68,7 +68,7 @@ func BenchmarkRBucket_SetGet(b *testing.B) {
 	if err != nil {
 		b.Skip(err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // test cleanup
 	bk := client.GetBucket(uniqueKeyB(b, "bucket"))
 	defer bk.Delete(testCtx) //nolint:errcheck
 	b.ResetTimer()

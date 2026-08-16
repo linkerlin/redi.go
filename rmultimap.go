@@ -20,10 +20,6 @@ type RMultimap struct {
 	isSet bool // true: SET collection; false: LIST collection
 }
 
-func newRMultimap(c *Client, name string, isSet bool) *RMultimap {
-	return &RMultimap{rObject: rObject{c: c, name: name}, isSet: isSet}
-}
-
 // internalID computes the Redisson Hash.hash128toBase64 for an encoded key.
 // Note the big-endian packing (the bloom filter uses the raw little-endian
 // halves — both match their respective Java call sites).

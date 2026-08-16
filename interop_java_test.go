@@ -67,8 +67,7 @@ func startJavaProbe() {
 	}
 
 	// Compile + resolve classpath (cached by maven after the first run).
-	compile := exec.Command(mvnBin, "-q", "-f", filepath.Join(probeDir, "pom.xml"),
-		"compile",
+	compile := exec.Command(mvnBin, "-q", "-f", filepath.Join(probeDir, "pom.xml"), "compile",
 		"dependency:build-classpath", "-Dmdep.outputFile=target/cp.txt")
 	compile.Dir = probeDir
 	compile.Env = javaEnv()
@@ -118,8 +117,6 @@ func startJavaProbe() {
 		javaStartErr = err
 	}
 }
-
-func mnBin2(mvnBin string) string { return mvnBin }
 
 func javaEnv() []string {
 	env := os.Environ()

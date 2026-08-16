@@ -41,22 +41,9 @@ func newRDelayedQueue(c *Client, name string) *RDelayedQueue {
 	return dq
 }
 
-// packDelayedMember builds the Redisson struct layout 'Bc0Lc0':
-// uint8 randomIdLen + randomId + 8-byte encLen + encodedValue.
-// The Lua struct 'L' length prefix is LITTLE-endian on x86 Redis (verified
-// by hex-dumping real packed members); randomId is generateIdArray(8).
-func packDelayedMember(randomID, encoded []byte) string {
-	buf := make([]byte, 0, 9+len(randomID)+len(encoded))
-	buf = append(buf, byte(len(randomID)))
-	buf = append(buf, randomID...)
-	var lenBuf [8]byte
-	binary.LittleEndian.PutUint64(lenBuf[:], uint64(len(encoded)))
-	buf = append(buf, lenBuf[:]...)
-	buf = append(buf, encoded...)
-	return string(buf)
-}
-
 // unpackDelayedMember splits a packed member into (randomID, encoded).
+// (Packing happens inside the offer Lua script — struct.pack in Redis — so
+// only the decode direction exists in Go.)
 func unpackDelayedMember(v string) (string, string, bool) {
 	b := []byte(v)
 	if len(b) < 1 {

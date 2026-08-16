@@ -91,7 +91,7 @@ func (l *RCountDownLatch) Await(ctx context.Context, timeout time.Duration) (boo
 	}
 
 	sub := l.subscribe(ctx, l.channel)
-	defer sub.Close()
+	defer sub.Close() //nolint:errcheck // connection teardown
 	wake := sub.Channel()
 	for {
 		select {

@@ -7,6 +7,45 @@ import (
 	redi "github.com/linkerlin/redi.go"
 )
 
+// TestRRateLimiter_ExpiredPermitsReturnToPool locks the purge arithmetic:
+// the byte-math reader ported from redi.py read the permits tail
+// big-endian while writers packed little-endian, releasing 16777216 per
+// expired permit instead of 1 (value ballooned to 16M+ in the wild).
+func TestRRateLimiter_ExpiredPermitsReturnToPool(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "rate-expiry")
+	r := client.GetRateLimiter(name)
+	defer r.Delete(testCtx) //nolint:errcheck
+
+	if _, err := r.TrySetRate(testCtx, redi.RateTypeOverall, 3, 500*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+
+	// Consume the whole window.
+	for i := 0; i < 3; i++ {
+		if ok, err := r.TryAcquire(testCtx, 1); err != nil || !ok {
+			t.Fatalf("acquire %d = %v, %v", i, ok, err)
+		}
+	}
+	if avail, _ := r.AvailablePermits(testCtx); avail != 0 {
+		t.Fatalf("available after drain = %d", avail)
+	}
+
+	// Wait past the window: the expired permits must return EXACTLY rate.
+	if !eventual(t, 3*time.Second, func() bool {
+		avail, _ := r.AvailablePermits(testCtx)
+		return avail == 3
+	}) {
+		avail, _ := r.AvailablePermits(testCtx)
+		t.Fatalf("available after expiry = %d, want exactly 3 (purge math broken)", avail)
+	}
+
+	// And a fresh window cycle works.
+	if ok, _ := r.TryAcquire(testCtx, 3); !ok {
+		t.Fatal("full-window acquire after expiry failed")
+	}
+}
+
 func TestRRateLimiter(t *testing.T) {
 	client := newTestClient(t)
 	r := client.GetRateLimiter(uniqueKey(t, "rate"))

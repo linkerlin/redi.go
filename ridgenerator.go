@@ -69,16 +69,17 @@ func (g *RIdGenerator) loadAllocation(ctx context.Context) error {
 		return nil
 	}
 	v, err := g.rc().Get(ctx, g.allocationKey()).Result()
-	if err == nil {
+	switch err {
+	case nil:
 		g.mu.Lock()
 		g.allocSize = parseInt64(v)
 		g.allocLoaded = true
 		g.mu.Unlock()
-	} else if err == redis.Nil {
+	case redis.Nil:
 		g.mu.Lock()
 		g.allocLoaded = true
 		g.mu.Unlock()
-	} else {
+	default:
 		return err
 	}
 	return nil

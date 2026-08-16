@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.7 (2026-08-15) — 限流器双重正确性修复 + 工程质量
+
+### 修复（RRateLimiter，生产级隐患）
+- **过期归还算术错误**：从 redi.py 移植的手写字节运算按大端读 permits 尾部、而写入按小端打包 —— 每个过期许可归还 **16777216** 而非 1（实测 `{name}:value` 灌到 16777210）。改用 Redisson 原版 `struct.pack('Bc0I',...)/struct.unpack('Bc0I',...)`（与 Java 字节级一致、读写自洽）
+- **重复获取塌缩**：TryAcquire 传固定 client id → 相同 member 被 ZADD 去重覆盖，3 次获取只剩 1 条（2 个许可永久泄漏）。改为每次获取生成随机 16 字节 id（对齐 Java `generateIdArray()`）
+- **AvailablePermits 池缩水**：裸 `ZRemRangeByScore` 删除过期许可但不归还池 → 读操作会永久缩小窗口。改用共享 purge Lua（带回池）
+- 新增回归测试 `TestRRateLimiter_ExpiredPermitsReturnToPool`（过期后精确归还 rate 个）
+
+### 工程质量
+- **golangci-lint 清零**（13 项：errcheck 7 / staticcheck 3 / 死代码 3）并纳入 CI；checkout@v5 + setup-go@v6
+- **godoc 示例测试**（example_test.go，5 个可运行示例：NewClient/RLock/RAtomicLong/RRateLimiter/RBatch，自带键清理可重跑）
+
 ## v0.2.6 (2026-08-15)
 
 - **Codec Encode 快路径**：标量（string/int/float/bool）单次序列化直达，不再走 marshal→unmarshal→rewrap 三段管线（基准：字符串 103ns、int 63ns，原均 ~2.4µs，**~25x**）；复合值仍递归类型包装

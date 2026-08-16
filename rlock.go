@@ -113,7 +113,7 @@ func (l *RLock) Lock(ctx context.Context, clientID string, ttl time.Duration) er
 
 	// Contended: subscribe for unlock wake-ups, retry with 1s fallback.
 	sub := l.subscribe(ctx, l.channel)
-	defer sub.Close()
+	defer sub.Close() //nolint:errcheck // connection teardown
 	wake := sub.Channel()
 	for {
 		res, err = l.runAcquire(ctx, clientID, lease)

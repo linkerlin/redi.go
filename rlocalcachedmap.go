@@ -63,7 +63,7 @@ func newRLocalCachedMap(c *Client, name string) *RLocalCachedMap {
 func (m *RLocalCachedMap) startListener(ctx context.Context) {
 	sub := m.c.rc.Subscribe(ctx, m.invalChannel)
 	go func() {
-		defer sub.Close() //nolint:errcheck
+		defer sub.Close() //nolint:errcheck // connection teardown //nolint:errcheck
 		if _, err := sub.Receive(ctx); err != nil {
 			return
 		}
@@ -151,7 +151,7 @@ func (m *RLocalCachedMap) PutIfAbsent(ctx context.Context, field string, value a
 // Remove deletes the field everywhere and broadcasts.
 func (m *RLocalCachedMap) Remove(ctx context.Context, field string) error {
 	ek := encodeKey(m.c.codec, field)
-	if err := m.RMap.Delete(ctx, field); err != nil {
+	if err := m.Delete(ctx, field); err != nil { //nolint:staticcheck // embedded selector for clarity
 		return err
 	}
 	m.mu.Lock()

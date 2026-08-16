@@ -226,7 +226,7 @@ func (s *RReadWriteSubLock) Lock(ctx context.Context, clientID string, ttl time.
 		return err
 	}
 	sub := s.subscribe(ctx, s.channel)
-	defer sub.Close()
+	defer sub.Close() //nolint:errcheck // connection teardown
 	wake := sub.Channel()
 	for {
 		select {

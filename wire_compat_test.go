@@ -20,7 +20,7 @@ func rawClient(t *testing.T) *redis.Client {
 	t.Helper()
 	rc := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
 	if err := rc.Ping(testCtx).Err(); err != nil {
-		rc.Close()
+		_ = rc.Close() //nolint:errcheck // skip-path close
 		t.Skip("Redis not available:", err)
 	}
 	t.Cleanup(func() { _ = rc.Close() })
@@ -62,7 +62,7 @@ func TestWire_RLockLayout(t *testing.T) {
 
 	// Channel name: redisson_lock__channel:{name}
 	sub := rc.Subscribe(testCtx, "redisson_lock__channel:{"+name+"}")
-	defer sub.Close()
+	defer sub.Close() //nolint:errcheck // connection teardown
 	if err := l.Lock(testCtx, "uuid-9:1", time.Minute); err != nil {
 		t.Fatal(err)
 	}

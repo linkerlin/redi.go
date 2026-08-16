@@ -69,7 +69,7 @@ func (s *RSemaphore) Acquire(ctx context.Context, permits int64) error {
 		return err
 	}
 	sub := s.subscribe(ctx, s.channel)
-	defer sub.Close()
+	defer sub.Close() //nolint:errcheck // connection teardown
 	wake := sub.Channel()
 	for {
 		select {

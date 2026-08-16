@@ -27,7 +27,7 @@
 | RReadWriteLock | 单 HASH + `mode` 字段（read/write/read-write），读 field=`{id}` 写 field=`{id}:write`，channel `redisson_rwlock:{name}`（读释放消息 1 / 写释放 0） | **Redisson 4.6.1 直接双向实测 ✅**（读写互斥、共享读、释放可见） |
 | RSemaphore | STRING 计数器 + `redisson_sc:{name}` 唤醒 | **Redisson 4.6.1 直接实测 ✅** |
 | RCountDownLatch | STRING 计数 + DECR/DEL/PUBLISH（channel `redisson_countdownlatch__channel__{name}`，消息 0/1） | **Redisson 4.6.1 countDown 唤醒 Go Await ✅** |
-| RRateLimiter | HASH `{name}`（rate/interval/keepAliveTime/type 枚举序数）+ `{name}:value` + ZSET `{name}:permits`（member=0x10+16B UUID+LE uint32 permits） | **Redisson 4.6.1 共享窗口实测 ✅** |
+| RRateLimiter | HASH `{name}`（rate/interval/keepAliveTime/type 枚举序数）+ `{name}:value` + ZSET `{name}:permits`（member=`struct.pack('Bc0I', len, id16B, permits)`，**每次获取随机 id**——固定 id 会因 ZADD 去重塌缩；过期归还走 `struct.unpack`，勿用字节手算——endianness 曾致 16M 归还） | **Redisson 4.6.1 共享窗口实测 ✅** + 过期归还回归测试 |
 | RMap / RList / RSet / RQueue / RDeque / RBlockingQueue | 裸名 + JSON 值编码（JsonJacksonCodec 互通，含 @class/Long/ArrayList 包装） | **Redisson 4.6.1 String/Long/嵌套对象双向实测 ✅** |
 | RScoredSortedSet | ZSET + JSON member | **Redisson 4.6.1 score/rank 双向实测 ✅** |
 | RLexSortedSet | ZSET + 字典序操作，成员**裸存储**（跳过 codec，Redisson 特例） | **Redisson 4.6.1 add/range 双向实测 ✅** |
