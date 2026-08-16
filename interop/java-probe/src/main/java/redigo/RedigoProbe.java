@@ -258,6 +258,46 @@ public final class RedigoProbe {
                 reply(map("value", bs.length()));
             }
 
+            case "stream_add" -> {
+                org.redisson.api.RStream<Object, Object> st = rs.getStream(a[1]);
+                org.redisson.api.stream.StreamMessageId id =
+                        st.add(org.redisson.api.stream.StreamAddArgs.entry(
+                                OM.readValue(a[2], Object.class),
+                                OM.readValue(a[3], Object.class)));
+                reply(map("id", id.toString()));
+            }
+            case "stream_create_group" -> {
+                org.redisson.api.RStream<Object, Object> st = rs.getStream(a[1]);
+                st.createGroup(org.redisson.api.stream.StreamCreateGroupArgs
+                        .name(a[2]).id(org.redisson.api.stream.StreamMessageId.ALL));
+                reply(map("ok", true));
+            }
+            case "stream_read_group" -> {
+                org.redisson.api.RStream<Object, Object> st = rs.getStream(a[1]);
+                Map<org.redisson.api.stream.StreamMessageId, Map<Object, Object>> res =
+                        st.readGroup(a[2], a[3],
+                                org.redisson.api.stream.StreamReadGroupArgs
+                                        .neverDelivered()
+                                        .count(Integer.parseInt(a[4])));
+                Map<String, Object> out = new HashMap<>();
+                for (Map.Entry<org.redisson.api.stream.StreamMessageId, Map<Object, Object>> e : res.entrySet()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (Map.Entry<Object, Object> f : e.getValue().entrySet()) {
+                        sb.append(String.valueOf(f.getKey())).append("=")
+                          .append(String.valueOf(f.getValue()));
+                    }
+                    out.put(e.getKey().toString(), sb.toString());
+                }
+                reply(map("entries", out));
+            }
+            case "stream_ack" -> {
+                org.redisson.api.RStream<Object, Object> st = rs.getStream(a[1]);
+                String[] parts = a[3].split("[-]");
+                reply(map("value", st.ack(a[2],
+                        new org.redisson.api.stream.StreamMessageId(
+                                Long.parseLong(parts[0]), Long.parseLong(parts[1])))));
+            }
+
             case "along_add" -> {
                 RAtomicLong al = rs.getAtomicLong(a[1]);
                 reply(map("value", al.addAndGet(Long.parseLong(a[2]))));

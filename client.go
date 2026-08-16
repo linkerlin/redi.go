@@ -280,6 +280,9 @@ func (c *Client) GetGeo(name string) *RGeo { return newRGeo(c, name) }
 // GetBitSet returns a distributed bitset (raw Redis bit numbering).
 func (c *Client) GetBitSet(name string) *RBitSet { return newRBitSet(c, name) }
 
+// GetStream returns a distributed log stream (Redis Stream).
+func (c *Client) GetStream(name string) *RStream { return newRStream(c, name) }
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)

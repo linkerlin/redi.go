@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.3 (2026-08-15)
+
+- **RStream**：Redis Stream 全家 —— Add（含 MAXLEN 裁剪）/ReadRange/ReadReverse/Len/Trim(MAXLEN+MINID)/Remove/CreateGroup(BUSYGROUP 幂等)/DeleteGroup/CreateConsumer/RemoveConsumer/ReadGroup/PendingRange/Ack/Claim/AutoClaim；field 名与值均 codec 编码（Redisson RStream 同款）
+- **修复 go-redis 陷阱**：`XReadGroup Block:0` = 永久阻塞（库内 `Block>=0` 恒发 BLOCK）→ block<=0 时内部传 -1 省略
+- Java 互操作 17 → **18 组**（RStream：Java 写→Go 组读、跨语言 Ack 清 Pending、Go 写→Java 新组读全史）
+
 ## v0.2.2 (2026-08-15)
 
 - **RHyperLogLog**：PFADD/PFCOUNT/PFMERGE + 联合计数/合并
