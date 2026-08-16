@@ -333,6 +333,19 @@ func (c *Client) GetTimeSeries(name string) *RTimeSeries {
 	return newRTimeSeries(c, name)
 }
 
+// GetRingBuffer returns a capacity-bounded FIFO that evicts on overflow.
+func (c *Client) GetRingBuffer(name string) *RRingBuffer {
+	return newRRingBuffer(c, name)
+}
+
+// GetShardedTopic returns a Redis 7+ sharded pub/sub topic (SSUBSCRIBE).
+func (c *Client) GetShardedTopic(name string) *RShardedTopic {
+	return newRShardedTopic(c, name)
+}
+
+// GetFunction returns the Redis functions facade (FUNCTION/FCALL).
+func (c *Client) GetFunction() *RFunction { return newRFunction(c) }
+
 // GetScoredSortedSet returns a distributed sorted set (Redis ZSET).
 func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 	return newRScoredSortedSet(c, name)

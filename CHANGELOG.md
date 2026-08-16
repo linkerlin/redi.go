@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.12 (2026-08-15)
+
+- **RRingBuffer**：定容环形缓冲（源码复刻）—— `redisson_rb:{name}` 容量 SETNX + RPUSH/LPOP 溢出淘汰（批量 LTRIM、SetCapacity 即时裁剪，Lua 同 Java 原版）、ReadOldest/ReadNewest/RemainingCapacity
+- **RShardedTopic**：Redis 7+ 分片 pub/sub（SSUBSCRIBE/SSPUBLISH + SHARDNUMSUB 计数）—— cluster 下消息不占总线广播；订阅生命周期遵循 AGENTS.md 陷阱清单（listener 自消费 ack + owner Close）
+- **RFunction**：Redis Functions 门面（FUNCTION LOAD(REPLACE)/DELETE/LIST/FLUSH + FCALL/FCALL_RO）
+- 三个结构均 Redis 原生协议，跨语言自动互通
+
 ## v0.2.11 (2026-08-15)
 
 - **RTimeSeries**：时间序列（源码复刻 RedissonTimeSeries）—— 序列号 member（`redisson__ts_seq` 零填充 20 位，同刻多条目共存）、每条目 TTL（TTL 分支 score=截止时刻 vs 无 TTL 分支 now+100 年 +1，两个 Lua 变体）、label mark 字节（2/3）、Get/Range 惰性过滤过期、Size=ZCARD−过期（Java 同款惰性计数）、Remove/Delete

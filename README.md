@@ -32,6 +32,7 @@
 | **RLongAdder / RDoubleAdder** | 高争用计数器：本地零网络累积，`Sum()` 跨实例（含 Java）协同 flush；非破坏性 |
 | **RFencedLock / RMultiLock** | 栅栏令牌锁（每次获取 INCR token，防锁过期脑裂）/ 多锁全有或全无（失败回滚） |
 | **RTimeSeries** | 时间序列（序列号去重同刻条目、每条目 TTL、惰性过期 size，Redisson wire 兼容） |
+| **RRingBuffer / RShardedTopic / RFunction** | 定容环形缓冲（溢出淘汰最旧）/ Redis 7+ 分片 pub/sub（SSUBSCRIBE，cluster 友好）/ Redis Functions（FUNCTION/FCALL） |
 | **RKeys / RBuckets / RScript** | 键空间管理（SCAN/模式删除）/ 批量桶（MSET/MGET）/ Lua 脚本执行 |
 | **RBatch** | 管道批处理（`NewBatch()` → 结构写操作入队 → `Execute()` 单次往返，实测 **~7x** 加速） |
 | **多拓扑** | single / cluster / sentinel（redis.UniversalClient） |

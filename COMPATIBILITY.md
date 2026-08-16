@@ -53,6 +53,9 @@
 | RFencedLock | RLock 布局 + `redisson_lock_token:{name}` 计数器；acquire Lua 同 Redisson 原版（`INCR` token —— **重入也递增**；成功返回 `{-1,token}`）；GetToken 为十进制 GET（StringCodec） | wire 契约测试 ✅（token key 名 + 十进制格式） |
 | RMultiLock | 纯客户端编排（成员即普通 RLock） | 单元测试 ✅（全有或全无 + 失败回滚） |
 | RTimeSeries | 源码复刻：ZSET `{name}`（score=时间戳，member=`struct.pack('BBc0Lc0Lc0',4,idLen,id,valLen,val,lblLen,lbl)`，id 来自 `redisson__ts_seq:{name}` 零填充 20 位序列）+ 过期 ZSET `redisson__ts_ttl:{name}`（TTL 分支 score=截止时刻；无 TTL 分支=now+100 年取 max 再 +1）；label blob=mark 字节(2 无/3 有)+label；Size=ZCARD−过期（惰性） | **Redisson 4.6.1 双向实测 ✅**（Go 写→Java 精确时间戳读回；Java 写→Go Range 解码 + size 一致） |
+| RRingBuffer | LIST `{name}` + 容量 STRING `redisson_rb:{name}`（SETNX，十进制）；溢出 RPUSH+LPOP（批量 LTRIM；SetCapacity 即时裁剪）—— Lua 同 Java 原版 | wire 层同族（Java 可按 LIST+settings 读） |
+| RShardedTopic | Redis 7+ SSUBSCRIBE/SSPUBLISH（codec 编码消息；PUBSUB SHARDNUMSUB 计数） | Redis 原生协议，跨语言自动互通 ✅ |
+| RFunction | FUNCTION LOAD(REPLACE)/DELETE/LIST/FLUSH + FCALL/FCALL_RO | Redis 原生命令，跨语言自动互通 ✅ |
 | 嵌套复合值编码 | 递归类型包装（map→@class / slice→ArrayList 包装，任意深度） | **Redisson 4.6.1 深层嵌套（map>array>map>array）实测 ✅** |
 | RKeys | DBSIZE/SCAN 迭代/模式删除（Del/Unlink）/Copy/Type/FlushDB | 单元测试 ✅ |
 | RBuckets | MGET/MSET/MSETNX + 批量 TTL（pipeline） | 单元测试 ✅ |
