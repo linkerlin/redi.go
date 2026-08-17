@@ -19,8 +19,11 @@ import org.redisson.api.RMapCache;
 import org.redisson.api.RMapCacheNative;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RReadWriteLock;
+import org.redisson.api.RRingBuffer;
 import org.redisson.api.RScoredSortedSet;
 import org.redisson.api.RSemaphore;
+import org.redisson.api.RSetMultimapCacheNative;
+import org.redisson.api.RListMultimapCacheNative;
 import org.redisson.api.RateIntervalUnit;
 import org.redisson.api.RateType;
 import org.redisson.api.RedissonClient;
@@ -566,6 +569,53 @@ public final class RedigoProbe {
             case "mcn_get" -> {
                 RMapCacheNative<Object, Object> m = rs.getMapCacheNative(a[1]);
                 reply(map("value", m.get(OM.readValue(a[2], Object.class))));
+            }
+
+            case "smmcn_put" -> {
+                RSetMultimapCacheNative<Object, Object> m = rs.getSetMultimapCacheNative(a[1]);
+                reply(map("added", m.put(OM.readValue(a[2], Object.class),
+                        OM.readValue(a[3], Object.class))));
+            }
+            case "smmcn_expire" -> {
+                RSetMultimapCacheNative<Object, Object> m = rs.getSetMultimapCacheNative(a[1]);
+                reply(map("ok", m.expireKey(OM.readValue(a[2], Object.class),
+                        Long.parseLong(a[3]), TimeUnit.MILLISECONDS)));
+            }
+            case "smmcn_getall" -> {
+                RSetMultimapCacheNative<Object, Object> m = rs.getSetMultimapCacheNative(a[1]);
+                reply(map("values", new ArrayList<>(m.getAll(OM.readValue(a[2], Object.class)))));
+            }
+
+            case "lmmcn_put" -> {
+                RListMultimapCacheNative<Object, Object> m = rs.getListMultimapCacheNative(a[1]);
+                reply(map("added", m.put(OM.readValue(a[2], Object.class),
+                        OM.readValue(a[3], Object.class))));
+            }
+            case "lmmcn_expire" -> {
+                RListMultimapCacheNative<Object, Object> m = rs.getListMultimapCacheNative(a[1]);
+                reply(map("ok", m.expireKey(OM.readValue(a[2], Object.class),
+                        Long.parseLong(a[3]), TimeUnit.MILLISECONDS)));
+            }
+            case "lmmcn_getall" -> {
+                RListMultimapCacheNative<Object, Object> m = rs.getListMultimapCacheNative(a[1]);
+                reply(map("values", new ArrayList<>(m.getAll(OM.readValue(a[2], Object.class)))));
+            }
+
+            case "rb_capacity" -> {
+                RRingBuffer<Object> rb = rs.getRingBuffer(a[1]);
+                reply(map("ok", rb.trySetCapacity(Integer.parseInt(a[2]))));
+            }
+            case "rb_add" -> {
+                RRingBuffer<Object> rb = rs.getRingBuffer(a[1]);
+                reply(map("ok", rb.add(OM.readValue(a[2], Object.class))));
+            }
+            case "rb_poll" -> {
+                RRingBuffer<Object> rb = rs.getRingBuffer(a[1]);
+                reply(map("value", rb.poll()));
+            }
+            case "rb_size" -> {
+                RRingBuffer<Object> rb = rs.getRingBuffer(a[1]);
+                reply(map("size", rb.size()));
             }
 
             case "bbq_capacity" -> {
