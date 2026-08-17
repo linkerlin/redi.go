@@ -37,7 +37,23 @@ type RLocalCachedMap struct {
 	ready    chan struct{}
 }
 
+// LocalCachedMapOptions configures near-cache behaviour.
+type LocalCachedMapOptions struct {
+	// DisableNearCache turns off the in-process cache (every Get hits Redis).
+	// Use for Java/Go mixed deployments until Redisson binary invalidation is
+	// implemented — data layer remains wire-compatible.
+	DisableNearCache bool
+	// CacheTTL expires local entries after this duration (0 = no local TTL).
+	CacheTTL time.Duration
+	// SizeLimit caps local entries (0 = unlimited).
+	SizeLimit int
+}
+
 func newRLocalCachedMap(c *Client, name string) *RLocalCachedMap {
+	return newRLocalCachedMapOpts(c, name, nil)
+}
+
+func newRLocalCachedMapOpts(c *Client, name string, opts *LocalCachedMapOptions) *RLocalCachedMap {
 	ctx, cancel := context.WithCancel(c.ctx)
 	uniq := make([]byte, 6)
 	if _, err := rand.Read(uniq); err != nil {
@@ -51,8 +67,16 @@ func newRLocalCachedMap(c *Client, name string) *RLocalCachedMap {
 		stop:         cancel,
 		ready:        make(chan struct{}),
 	}
+	if opts != nil {
+		m.cacheTTL = opts.CacheTTL
+		m.sizeLimit = opts.SizeLimit
+		if opts.DisableNearCache {
+			m.sizeLimit = -1 // sentinel: never store locally
+			close(m.ready)
+			return m
+		}
+	}
 	m.startListener(ctx)
-	// Wait for the subscription so no early write's broadcast is missed.
 	select {
 	case <-m.ready:
 	case <-time.After(c.cfg.DialTimeout):
@@ -345,6 +369,9 @@ func (m *RLocalCachedMap) SetLocalCacheLimit(ttl time.Duration, maxEntries int) 
 func (m *RLocalCachedMap) storeLocal(ek string, value any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.sizeLimit < 0 {
+		return // near cache disabled
+	}
 	if m.sizeLimit > 0 && len(m.cache) >= m.sizeLimit {
 		if _, exists := m.cache[ek]; !exists {
 			return // cache full - serve from Redis until entries evict

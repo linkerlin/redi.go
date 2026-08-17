@@ -26,21 +26,23 @@ It has passed **Go ↔ real Redisson 4.6.1 bidirectional interop tests** (24 `Te
 | **RTopic / RPatternTopic** | Pub/sub (including pattern subscription) |
 | **RBloomFilter / RBloomFilterNative / RCuckooFilter / RTopK / RTDigest / RGcra** | Classic bloom / Redis BF.* / CF.* / TOPK.* / TDIGEST.* / GCRA (tests auto-skip when commands are missing) |
 | **RIdGenerator** | ID generator (batched allocation cache) |
-| **RTransferQueue** | Atomic cross-queue transfer (single Lua) |
+| **RTransferQueue / GetQueueTransfer** | **GO_ONLY** atomic queue migrate (not Java RemoteService TransferQueue) |
 | **RHyperLogLog / RGeo / RBitSet / RStream** | Cardinality / geo index (bulk GEO, GEOSEARCHSTORE) / distributed bitmap (Java bit order) / distributed log (consumer groups, Pending, Claim/AutoClaim) |
 | **RPermitExpirableSemaphore / RReliableTopic** | Semaphore with per-permit leases / Stream-based reliable topic (per-subscriber consumer group + crash redelivery) |
-| **RLocalCachedMap** | Near cache map (write-through + cross-instance invalidation; data layer is RMap wire format, readable by Java) |
+| **RLocalCachedMap** | Near cache (write-through + Go invalidation; use `DisableNearCache` when mixed with Java); data layer = RMap wire |
 | **RPriorityQueue / RPriorityBlockingQueue / RPriorityBlockingDeque / RPriorityDeque** | ZSET+score priority queue and blocking/double-ended wrappers (**not** Java Comparator same-name protocol) |
-| **RArray** | Redis 8.8+ ARRAY (ARSET/ARGET/…; tests skip when commands are missing) |
-| **RClientSideCaching** | PARTIAL: `Config.ClientSideCaching` or `GetClientSideCachingWithOptions` (dedicated RESP3 tracking pool); not Java EvictionPolicy read-proxy |
+| **RArray / RCircularBuffer** | Redis 8.8+ ARRAY; CircularBuffer stable slots (≠ RingBuffer); skip when missing |
+| **RJsonBucket / RVectorSet / RSearch / RMaps** | RedisJSON / Vector Set / RediSearch subset / bulk HASH import (skip when modules missing) |
+| **RClientSideCaching** | PARTIAL: go-redis RESP3 TRACKING (standalone DB0); not Java EvictionPolicy |
 | **RLongAdder / RDoubleAdder** | High-contention counters: local zero-network accumulation; `Sum()` coordinates flush across instances (including Java); non-destructive |
 | **RFencedLock / RMultiLock / RRedLock** | Fenced token lock / all-or-nothing multi-lock / RedLock strict majority (rollback on failure) |
 | **RTimeSeries** | Time series (multiple entries per timestamp, entry TTL, first/last read/poll, forward/reverse ranges; Redisson wire compatible) |
 | **RRingBuffer / RShardedTopic / RFunction** | Fixed-capacity ring buffer (evict oldest on overflow) / Redis 7+ sharded pub/sub (SSUBSCRIBE, cluster-friendly) / Redis Functions (FUNCTION/FCALL) |
-| **RKeys / RBuckets / RScript** | Keyspace management (SCAN / pattern delete) / bulk buckets (MSET/MGET) / Lua script execution |
+| **RKeys / RBuckets / RScript / GetRedisNodes** | Keyspace / bulk buckets / Lua / topology probe |
 | **RBatch** | Pipeline batching (`NewBatch()` → enqueue structure writes → `Execute()` in one round-trip; measured **~7×** speedup) |
 | **Topologies** | single / cluster / sentinel (`redis.UniversalClient`) |
 | **TUI Dashboard** | Terminal monitoring panel based on charmbracelet/bubbles |
+| **Alignment roadmap** | See [演进方案.md](演进方案.md) and [COMPATIBILITY.md](COMPATIBILITY.md) |
 
 Default value codec is `JSONCodec`: interoperable with Redisson `JsonJacksonCodec` (integers beyond int32 are wrapped as `["java.lang.Long",v]`; decode strips `@class` typing). Override via `Config.Codec`. Structured reads can use `GetInto` / `PeekInto` / `PollInto` / `Remove*Into` on `RBucket` / `RMap` / `RList` / `RQueue` / `RDeque` / `RLocalCachedMap` to bind into typed pointers; `RMap` also exposes `PutAll` / `FastPut*` / `Replace*` / `Keys` / `Values`.
 

@@ -47,13 +47,15 @@ go test -bench . -benchtime 1s -run XXX_none .   # 基准
 
 ## 已知不做（勿重复提案）
 
+> 全面对齐路线与工厂一态总表见 [演进方案.md](演进方案.md) 与 [COMPATIBILITY.md](COMPATIBILITY.md)。
+
 - RSortedSet（LIST+Comparator 版）—— 勿用 ZSET 冒充；无公开可移植 Comparator 序列化。
 - RPriorityBlockingQueue / RPriorityBlockingDeque / RPriorityDeque：**已提供 ZSET+score 包装**（`GetPriorityBlocking*` / `GetPriorityDeque`），**明确非 Java Comparator 协议**，不可与 `getPriority*()` 互操作。
-- RTransaction —— Redisson 为快照回滚语义（operation log + 回滚），非 MULTI/EXEC 原子提交；勿用 TxPipeline 冒充。OSS 可对照但完整移植成本高，本库拒绝假实现。
-- Java LocalCachedMapInvalidation 二进制失效协议（keyHash + 更新日志 + Java 序列化）—— Go 失效广播为内部协议，COMPATIBILITY 已标注；未证明可忠实移植前保持诚实。
+- RTransaction —— Redisson 为快照回滚语义（operation log + 回滚），非 MULTI/EXEC 原子提交；勿用 TxPipeline 冒充。
+- Java LocalCachedMapInvalidation —— 为 Redisson **自定义二进制**协议（非 Java Serialization）；Go 默认内部 JSON 失效。混部请用 `LocalCachedMapOptions` 关闭近端缓存。完整二进制移植未列入当前阶段。
 - reactive/RxJava 范式 —— 本库为同步 Go API，不做 reactive 冒充。
-- RExecutorService / RRemoteService 的 Java 互操作 —— 依赖 Java 类加载/远程调用协议，Go sync 库不做假实现。
+- RExecutorService / RRemoteService / 真 RTransferQueue —— 依赖 Java 远程调用协议；Go `GetTransferQueue`/`GetQueueTransfer` 为队列迁移（GO_ONLY）。
 - LiveObject —— 依赖 Java 字节码增强，REFUSE_AS_FAKE。
-- **Redisson PRO-only**（开源 `Redisson.java` 直接抛 `UnsupportedOperationException`，无公开 wire/Lua）：`RReliableQueue`、`RLocalCachedMapCache`、`RReliablePubSubTopic`、`RBitVectorStore` —— **开源不可复刻**，不做 panic stub / 冒充。
-- `RClientSideCaching` —— **PARTIAL**：`Config.ClientSideCaching` 或 `GetClientSideCachingWithOptions` 打开 go-redis RESP3 CLIENT TRACKING（standalone DB0）；工厂门面转发结构。**非** Java 整结构读代理 + EvictionPolicy（LRU/LFU/SOFT/WEAK）模型。Cluster/Sentinel 未接线。
-- `RArray` —— **已实现** Redis 8.8+ ARRAY（`GetArray`）；命令缺失时测试 skip。
+- **Redisson PRO-only**：`RReliableQueue`、`RLocalCachedMapCache`、`RReliablePubSubTopic`、`RBitVectorStore` —— 开源不可复刻，不做 stub。
+- `RClientSideCaching` —— **PARTIAL**：go-redis RESP3 CLIENT TRACKING；**非** Java EvictionPolicy 读代理。
+- `RArray` / `RCircularBuffer` —— Redis 8.8+ ARRAY；命令缺失时测试 skip。CircularBuffer ≠ RingBuffer。

@@ -3,6 +3,7 @@ package redi
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -30,6 +31,7 @@ type RRateLimiter struct {
 	cfgLoaded bool
 	rate      int64
 	interval  int64
+	keepAlive int64 // ms; 0 = no TTL on config/companions
 	rtype     RateType
 }
 
@@ -118,6 +120,7 @@ func (r *RRateLimiter) ensureConfig(ctx context.Context) error {
 	if len(m) > 0 {
 		r.rate = parseInt64(m["rate"])
 		r.interval = parseInt64(m["interval"])
+		r.keepAlive = parseInt64(m["keepAliveTime"])
 		if t, ok := m["type"]; ok {
 			r.rtype = RateType(parseInt64(t))
 		}
@@ -127,24 +130,43 @@ func (r *RRateLimiter) ensureConfig(ctx context.Context) error {
 
 // TrySetRate sets the rate config only when not yet configured.
 func (r *RRateLimiter) TrySetRate(ctx context.Context, rateType RateType, rate int64, interval time.Duration) (bool, error) {
+	return r.TrySetRateWithKeepAlive(ctx, rateType, rate, interval, 0)
+}
+
+// TrySetRateWithKeepAlive is TrySetRate plus config/companion TTL (Java keepAliveTime).
+func (r *RRateLimiter) TrySetRateWithKeepAlive(
+	ctx context.Context, rateType RateType, rate int64, interval, keepAlive time.Duration,
+) (bool, error) {
 	if err := r.ensureConfig(ctx); err != nil {
 		return false, err
 	}
 	if r.rate > 0 || r.interval > 0 {
 		return false, nil
 	}
-	return true, r.SetRate(ctx, rateType, rate, interval)
+	return true, r.SetRateWithKeepAlive(ctx, rateType, rate, interval, keepAlive)
 }
 
 // SetRate (over)writes the persisted rate config.
 func (r *RRateLimiter) SetRate(ctx context.Context, rateType RateType, rate int64, interval time.Duration) error {
+	return r.SetRateWithKeepAlive(ctx, rateType, rate, interval, 0)
+}
+
+// SetRateWithKeepAlive writes rate config and optional keepAlive TTL on the
+// config HASH and active value/permits keys (Redisson keepAliveTime).
+func (r *RRateLimiter) SetRateWithKeepAlive(
+	ctx context.Context, rateType RateType, rate int64, interval, keepAlive time.Duration,
+) error {
 	intervalMs := interval.Milliseconds()
+	keepMs := keepAlive.Milliseconds()
+	if keepMs != 0 && keepMs < intervalMs {
+		return fmt.Errorf("redi: keepAlive must be >= rate interval")
+	}
 	_, err := rateSetScript.Run(ctx, r.rc(), r.rateKeys(),
-		rate, intervalMs, int(rateType), 0).Int()
+		rate, intervalMs, int(rateType), 0, keepMs).Int()
 	if err != nil {
 		return err
 	}
-	r.rate, r.interval, r.rtype, r.cfgLoaded = rate, intervalMs, rateType, true
+	r.rate, r.interval, r.keepAlive, r.rtype, r.cfgLoaded = rate, intervalMs, keepMs, rateType, true
 	return nil
 }
 
@@ -153,13 +175,24 @@ func (r *RRateLimiter) SetRate(ctx context.Context, rateType RateType, rate int6
 func (r *RRateLimiter) UpdateRate(
 	ctx context.Context, rateType RateType, rate int64, interval time.Duration,
 ) (bool, error) {
+	return r.UpdateRateWithKeepAlive(ctx, rateType, rate, interval, time.Duration(r.keepAlive)*time.Millisecond)
+}
+
+// UpdateRateWithKeepAlive is UpdateRate with an explicit keepAlive.
+func (r *RRateLimiter) UpdateRateWithKeepAlive(
+	ctx context.Context, rateType RateType, rate int64, interval, keepAlive time.Duration,
+) (bool, error) {
 	intervalMs := interval.Milliseconds()
+	keepMs := keepAlive.Milliseconds()
+	if keepMs != 0 && keepMs < intervalMs {
+		return false, fmt.Errorf("redi: keepAlive must be >= rate interval")
+	}
 	n, err := rateSetScript.Run(ctx, r.rc(), r.rateKeys(),
-		rate, intervalMs, int(rateType), 1).Int()
+		rate, intervalMs, int(rateType), 1, keepMs).Int()
 	if err != nil || n == 0 {
 		return false, err
 	}
-	r.rate, r.interval, r.rtype, r.cfgLoaded = rate, intervalMs, rateType, true
+	r.rate, r.interval, r.keepAlive, r.rtype, r.cfgLoaded = rate, intervalMs, keepMs, rateType, true
 	return true, nil
 }
 
@@ -184,15 +217,31 @@ if ARGV[3] == '1' then
     permitsName = KEYS[5]
 end
 local oldType = redis.call('hget', KEYS[1], 'type')
+local keepAlive = tonumber(ARGV[5])
+if keepAlive == nil then keepAlive = 0 end
 redis.call('hset', KEYS[1], 'rate', ARGV[1],
-    'interval', ARGV[2], 'type', ARGV[3], 'keepAliveTime', 0)
+    'interval', ARGV[2], 'type', ARGV[3], 'keepAliveTime', keepAlive)
 if oldType ~= false and oldType ~= ARGV[3] then
     redis.call('del', KEYS[2], KEYS[3], KEYS[4], KEYS[5])
 else
     redis.call('del', valueName, permitsName)
 end
+if keepAlive > 0 then
+    redis.call('pexpire', KEYS[1], keepAlive)
+    redis.call('pexpire', valueName, keepAlive)
+    redis.call('pexpire', permitsName, keepAlive)
+end
 return 1
 `)
+
+func (r *RRateLimiter) refreshKeepAlive(ctx context.Context) {
+	if r.keepAlive <= 0 {
+		return
+	}
+	_ = r.rc().PExpire(ctx, r.name, time.Duration(r.keepAlive)*time.Millisecond).Err()
+	_ = r.rc().PExpire(ctx, r.valueKey(), time.Duration(r.keepAlive)*time.Millisecond).Err()
+	_ = r.rc().PExpire(ctx, r.permitsKey(), time.Duration(r.keepAlive)*time.Millisecond).Err()
+}
 
 // TryAcquire takes permits when the window allows it.
 func (r *RRateLimiter) TryAcquire(ctx context.Context, permits int64) (bool, error) {
@@ -218,6 +267,9 @@ func (r *RRateLimiter) TryAcquire(ctx context.Context, permits int64) (bool, err
 		now, r.interval, r.rate, string(acquireID), permits).Int()
 	if err != nil {
 		return false, err
+	}
+	if n == 1 {
+		r.refreshKeepAlive(ctx)
 	}
 	return n == 1, nil
 }
@@ -320,9 +372,10 @@ func (r *RRateLimiter) AvailablePermits(ctx context.Context) (int64, error) {
 // RateLimiterConfig is the persisted limiter configuration (Redisson
 // RateLimiterConfig).
 type RateLimiterConfig struct {
-	RateType RateType
-	Rate     int64
-	Interval time.Duration
+	RateType  RateType
+	Rate      int64
+	Interval  time.Duration
+	KeepAlive time.Duration
 }
 
 // GetConfig loads the persisted config from Redis (empty when unset).
@@ -335,14 +388,16 @@ func (r *RRateLimiter) GetConfig(ctx context.Context) (RateLimiterConfig, error)
 		return RateLimiterConfig{}, nil
 	}
 	cfg := RateLimiterConfig{
-		Rate:     parseInt64(m["rate"]),
-		Interval: time.Duration(parseInt64(m["interval"])) * time.Millisecond,
-		RateType: RateTypeOverall,
+		Rate:      parseInt64(m["rate"]),
+		Interval:  time.Duration(parseInt64(m["interval"])) * time.Millisecond,
+		KeepAlive: time.Duration(parseInt64(m["keepAliveTime"])) * time.Millisecond,
+		RateType:  RateTypeOverall,
 	}
 	if t, ok := m["type"]; ok {
 		cfg.RateType = RateType(parseInt64(t))
 	}
-	r.rate, r.interval, r.rtype, r.cfgLoaded = cfg.Rate, cfg.Interval.Milliseconds(), cfg.RateType, true
+	r.rate, r.interval, r.keepAlive, r.rtype, r.cfgLoaded =
+		cfg.Rate, cfg.Interval.Milliseconds(), cfg.KeepAlive.Milliseconds(), cfg.RateType, true
 	return cfg, nil
 }
 

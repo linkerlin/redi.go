@@ -24,12 +24,16 @@ var ErrClientSideCachingUnavailable = errors.New("redi: client-side caching requ
 //     Destroy() closes it.
 //
 // Still PARTIAL vs Java: no in-process read-proxy with evictionPolicy LRU/LFU/SOFT/WEAK
-// over method arguments; go-redis owns the reply cache. Cluster/Sentinel unsupported.
+// over method arguments; go-redis owns the reply cache.
+//
+// Topology: Config.ClientSideCaching and GetClientSideCachingWithOptions require
+// ModeSingle + DB 0 + RESP3. Cluster/Sentinel return ErrClientSideCachingUnavailable
+// for the owned-options path; shared Config CSC is ignored outside ModeSingle.
 type RClientSideCaching struct {
 	c     *Client
 	owned bool // true when c is a dedicated CSC child client
 
-	mu       sync.Mutex
+	mu        sync.Mutex
 	destroyed bool
 }
 

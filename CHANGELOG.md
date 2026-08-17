@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **全面对齐演进方案**：重写 [演进方案.md](演进方案.md)；COMPATIBILITY 增加 RedissonClient 工厂一态总表；AGENTS 交叉引用
+- **阶段 A**：RateLimiter `SetRateWithKeepAlive` / config TTL 刷新；MultimapCache `StartAutoEviction`；锁族/AtomicDouble/BoundedBQ 对齐冒烟
+- **阶段 B**：`RJsonBucket`/`RJsonBuckets`、`RVectorSet`、`RSearch`（模块缺失 skip）
+- **阶段 C**：CSC 明确 Cluster/Sentinel 不可用边界（PARTIAL）
+- **阶段 D**：`LocalCachedMapOptions.DisableNearCache`（混部关近端；二进制失效未移植）
+- **阶段 E**：`Client.Config`/`GetRedisNodes`；`GetQueueTransfer` 别名；RMaps；Batch 门面既有 List/Set/Deque/AtomicDouble
+- **阶段 F**：`RCircularBuffer`（ARRAY 环，≠ RingBuffer；ARRING 缺失 skip）
 - **RArray**：Redis 8.8+ ARRAY（ARSET/ARGET/ARMGET/ARINSERT/…），`Client.GetArray`；命令缺失时测试 skip
 - **Priority* ZSET 包装**：`GetPriorityBlockingQueue` / `GetPriorityBlockingDeque` / `GetPriorityDeque`（BZPOPMIN/MAX）；COMPATIBILITY 明确非 Java Comparator
 - **RClientSideCaching 继续**：`GetClientSideCachingWithOptions` 创建独立 RESP3 CLIENT TRACKING 客户端（Destroy 关闭）；扩展 MaxMemoryBytes/DrainInterval/MaxStaleness；跨连接写后读失效回归

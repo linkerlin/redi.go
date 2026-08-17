@@ -90,22 +90,52 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 - 工厂方法双命名并存：`GetRLock`/`GetLock`、`GetRMap`/`GetMap`……（Redisson 风格为后者）。
 - `prefixName(prefix, name)` = `prefix:{name}`；`suffixName(name, suffix)` = `{name}:suffix`——花括号保证 cluster 同槽。
 
+## RedissonClient 工厂对齐总表
+
+> 一厂一态。详解与阶段见 [演进方案.md](演进方案.md)。状态：`WIRE_OK` 自定义 wire 可互操作；`NATIVE_OK` Redis 原生命令互通；`PARTIAL` 可用但不完整；`GO_ONLY` 同名不同协议；`REFUSE` 拒绝假实现；`PRO` 开源 UOE。
+
+| 工厂 | 状态 | 备注 |
+|------|------|------|
+| getLock / getFairLock / getSpinLock / getNonReentrant* / getFencedLock / getReadWriteLock | WIRE_OK | RWLock 续期 companion 与 Java 不完全同形，互斥 WIRE_OK |
+| getMultiLock / getRedLock | WIRE_OK | 客户端编排 |
+| getMap / getList / getSet / getQueue / getDeque / getBlocking* / getBoundedBlockingQueue | WIRE_OK | |
+| getMapCache / getMapCacheNative | WIRE_OK / NATIVE_OK | Native 需 Redis≥7.4 |
+| getSetCache / get*Multimap / get*MultimapCache / get*MultimapCacheNative | WIRE_OK / NATIVE_OK | |
+| getScoredSortedSet / getLexSortedSet / getBucket / getBinaryStream | WIRE_OK | |
+| getDelayedQueue / getAtomic* / getLongAdder / getDoubleAdder | WIRE_OK | |
+| getBloomFilter / getBloomFilterNative / getCuckooFilter / getTopK / getTDigest / getGcra | WIRE_OK / NATIVE_OK | |
+| getRateLimiter / getSemaphore / getPermitExpirableSemaphore / getCountDownLatch | WIRE_OK | keepAlive 见 RateLimiter API |
+| getTopic / getPatternTopic / getShardedTopic / getReliableTopic | WIRE_OK / NATIVE_OK | |
+| getStream / getGeo / getHyperLogLog / getBitSet / getTimeSeries / getRingBuffer | WIRE_OK / NATIVE_OK | |
+| getIdGenerator / getKeys / getBuckets / getScript / createBatch / getFunction | WIRE_OK / NATIVE_OK | |
+| getLocalCachedMap | PARTIAL | 数据层 WIRE_OK；失效为 Go JSON（可用 Options 关近端） |
+| getClientSideCaching | PARTIAL | go-redis TRACKING；非 Java EvictionPolicy |
+| getArray | NATIVE_OK | Redis 8.8+；命令缺失 skip |
+| getJsonBucket / getJsonBuckets | NATIVE_OK | RedisJSON；命令缺失 skip |
+| getVectorSet | NATIVE_OK | Redis 8+ VSET；命令缺失 skip |
+| getSearch | NATIVE_OK | RediSearch 核心子集；模块缺失 skip |
+| getMaps | NATIVE_OK | 批量 DEL+HSET（HIMPORT 可后续优化） |
+| getCircularBuffer | NATIVE_OK | P-post-4.6.1；ARRAY 环，≠ RingBuffer |
+| getPriority* | GO_ONLY | ZSET+score，非 Comparator |
+| getTransferQueue | GO_ONLY | 队列迁移；别名 `GetQueueTransfer` |
+| getId / getConfig / getRedisNodes | NATIVE_OK | 运维薄封装 |
+| getSortedSet | REFUSE | Comparator |
+| createTransaction | REFUSE | 非 MULTI/EXEC |
+| getRemoteService / getExecutorService / getLiveObjectService | REFUSE | |
+| getReliableQueue / getLocalCachedMapCache / getReliablePubSubTopic / getBitVectorStore | PRO | |
+
 ## ⚠ 已知限制
 
 | 项 | 说明 |
 |----|------|
 | RLock 的 holder id | 调用方传入；推荐 `Client.HolderID(threadID)` 生成 `uuid:threadId` 形态以对齐 Java field；Go 端不做线程绑定 |
-| RRateLimiter keepAlive | 不清理过期 config / 不做 keepAlive 轮询 |
-| RMapCache 事件 | 事件**发布**走 Redisson 通道名；Go `AddListener` 消费同通道。跨语言监听**非**本库承诺目标（表行以 Go 内消费为准） |
+| RMapCache 事件 | 事件**发布**走 Redisson 通道名；Go `AddListener` 消费同通道。跨语言监听**非**本库承诺目标 |
 | Float 精度 | JSON float64 编码；RAtomicDouble 用 INCRBYFLOAT（17 位有效数字） |
 | PER_CLIENT 限流 | key 带 Go 进程 id 后缀，跨语言语义等同（各客户端独立窗口），但 id 值与 Java 不同 |
-| RWLock watchdog 续期结构 | Go 端续期用 `hexists(field)+pexpire`（自洽正确）；Java 4.x 另有 `{name}:{cid}:{tid}:rwlock_timeout:1` 跟踪 key，Go 端未复刻（不影响互斥语义互操作） |
-| MultimapCache 淘汰方式 | 已含 ReplaceValues、全量 Entries/Values 与整对象 companion Expire；未实现 Java 后台 eviction scheduler，访问时惰性清理过期 key |
-| RSortedSet（LIST+Comparator） | 未实现；勿用 ZSET 冒充。Comparator 序列化不可移植 |
-| Priority*（ZSET 包装） | `GetPriorityQueue` / `GetPriorityBlocking*` / `GetPriorityDeque` 为自有 ZSET+score 语义，**非** Java Comparator 同名协议 |
-| Redisson PRO-only | `RReliableQueue` / `RLocalCachedMapCache` / `RReliablePubSubTopic` / `RBitVectorStore`：开源 `Redisson.java` 抛 UnsupportedOperationException，**开源不可复刻**，不做 stub |
-| RClientSideCaching | PARTIAL：go-redis CSC（Config 或 WithOptions 独立池，standalone+RESP3+DB0）；无 Java EvictionPolicy 读代理。Cluster/Sentinel 未接线 |
-| RTransaction | 拒绝 TxPipeline 冒充；OSS 为 operation-log+rollback，未移植 |
-| LCM 二进制失效 | 保持 Go 内部 JSON 失效协议；Java LocalCachedMapInvalidation 未复刻 |
-| reactive / Executor·Remote / LiveObject | 同步 Go 库范围外，REFUSE_AS_FAKE |
-| redi.py DelayedQueue | redi.py 为 4.x 前旧格式（单 ZSET），与本库/Java 4.6.1 不互通；Go↔Java 已直接双向实测 |
+| RWLock watchdog 续期结构 | Go 端续期用 `hexists(field)+pexpire`（自洽正确）；Java 另有 `{name}:{cid}:{tid}:rwlock_timeout:N`；互斥可互通，混部续期生命周期不完全同形 |
+| MultimapCache 淘汰 | 默认惰性清理；可选 `StartAutoEviction` 后台清扫 |
+| RClientSideCaching | PARTIAL：go-redis CSC；无 Java EvictionPolicy。Cluster/Sentinel 见实现注释 |
+| LCM 失效 | Go 内部 JSON；Java 自定义二进制协议（非 Java Serialization）未移植；见 `LocalCachedMapOptions` |
+| Priority* / TransferQueue | GO_ONLY，见总表 |
+| PRO / REFUSE | 见总表与 [演进方案.md](演进方案.md) §3.4–3.5 |
+| redi.py DelayedQueue | redi.py 为 4.x 前旧格式，与本库/Java 4.6.1 不互通 |

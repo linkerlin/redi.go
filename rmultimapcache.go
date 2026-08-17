@@ -2,6 +2,7 @@ package redi
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -22,6 +23,7 @@ type rMultimapCache struct {
 	rObject
 	multimap   RMultimap
 	timeoutKey string
+	evictOnce  sync.Once
 }
 
 func newRSetMultimapCache(c *Client, name string) *RSetMultimapCache {
@@ -352,4 +354,28 @@ func (m *rMultimapCache) Clear(ctx context.Context) error {
 // Delete removes the whole multimap cache.
 func (m *rMultimapCache) Delete(ctx context.Context) error {
 	return m.Clear(ctx)
+}
+
+// StartAutoEviction periodically runs lazy expiry cleanup until the client
+// closes (optional; default access paths already clean lazily).
+func (m *rMultimapCache) StartAutoEviction(interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	m.evictOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-m.c.ctx.Done():
+					return
+				case <-ticker.C:
+					ctx, cancel := context.WithTimeout(m.c.ctx, 3*time.Second)
+					_ = m.cleanupExpired(ctx)
+					cancel()
+				}
+			}
+		}()
+	})
 }

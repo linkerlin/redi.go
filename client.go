@@ -244,8 +244,14 @@ func (c *Client) Close() error {
 // Redis returns the underlying redis.UniversalClient for advanced direct use.
 func (c *Client) Redis() redis.UniversalClient { return c.rc }
 
-// ID returns this client's random id (hex string).
+// ID returns this client's random id (hex string), analogous to Redisson getId().
 func (c *Client) ID() string { return c.id }
+
+// Config returns a copy of the client Config (read-only snapshot).
+func (c *Client) Config() Config { return c.cfg }
+
+// GetRedisNodes returns a thin topology probe (PING / Info) for the current mode.
+func (c *Client) GetRedisNodes() *RRedisNodes { return newRRedisNodes(c) }
 
 // HolderID builds a Redisson-shaped lock HASH field "{clientUUID}:{threadID}".
 // Use the same threadID for Lock/Unlock/re-entry on one logical holder.
@@ -335,9 +341,14 @@ func (c *Client) GetDelayedQueue(name string) *RDelayedQueue {
 	return newRDelayedQueue(c, name)
 }
 
-// GetTransferQueue returns a queue that can atomically transfer elements to
-// a destination queue.
+// GetTransferQueue returns a Go-only queue-to-queue migrate helper.
+// Not Redisson RTransferQueue (RemoteService). Prefer GetQueueTransfer.
 func (c *Client) GetTransferQueue(name string) *RTransferQueue {
+	return newRTransferQueue(c, name)
+}
+
+// GetQueueTransfer is the honest alias of GetTransferQueue (GO_ONLY semantics).
+func (c *Client) GetQueueTransfer(name string) *RTransferQueue {
 	return newRTransferQueue(c, name)
 }
 
@@ -375,6 +386,12 @@ func (c *Client) GetReliableTopic(name string) *RReliableTopic {
 // (write-through + cross-instance invalidation broadcast).
 func (c *Client) GetLocalCachedMap(name string) *RLocalCachedMap {
 	return newRLocalCachedMap(c, name)
+}
+
+// GetLocalCachedMapWithOptions returns a local cached map with options
+// (e.g. DisableNearCache for mixed Java/Go deployments).
+func (c *Client) GetLocalCachedMapWithOptions(name string, opts *LocalCachedMapOptions) *RLocalCachedMap {
+	return newRLocalCachedMapOpts(c, name, opts)
 }
 
 // GetPriorityQueue returns a ZSET-backed priority queue (lower score =
@@ -606,3 +623,23 @@ func (c *Client) GetBuckets() *RBuckets { return newRBuckets(c) }
 
 // GetScript returns the Lua script evaluation facade.
 func (c *Client) GetScript() *RScript { return newRScript(c) }
+
+// GetJsonBucket returns a RedisJSON document bucket (JSON.* commands).
+func (c *Client) GetJsonBucket(name string) *RJsonBucket { return newRJsonBucket(c, name) }
+
+// GetJsonBuckets returns mass JSON bucket helpers.
+func (c *Client) GetJsonBuckets() *RJsonBuckets { return newRJsonBuckets(c) }
+
+// GetVectorSet returns a Redis 8+ vector set (VADD/VSIM/…).
+func (c *Client) GetVectorSet(name string) *RVectorSet { return newRVectorSet(c, name) }
+
+// GetSearch returns a RediSearch facade (FT.CREATE/SEARCH/DROPINDEX subset).
+func (c *Client) GetSearch() *RSearch { return newRSearch(c) }
+
+// GetCircularBuffer returns a Redis 8.8+ ARRAY circular buffer (≠ RRingBuffer).
+func (c *Client) GetCircularBuffer(name string) *RCircularBuffer {
+	return newRCircularBuffer(c, name)
+}
+
+// GetMaps returns mass HASH map import helpers (DEL+HSET per map).
+func (c *Client) GetMaps() *RMaps { return newRMaps(c) }

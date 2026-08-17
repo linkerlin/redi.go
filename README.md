@@ -26,21 +26,23 @@
 | **RTopic / RPatternTopic** | 发布订阅（含模式订阅） |
 | **RBloomFilter / RBloomFilterNative / RCuckooFilter / RTopK / RTDigest / RGcra** | 自研布隆 / Redis BF.* / CF.* / TOPK.* / TDIGEST.* / GCRA（命令缺失时测试自动 skip） |
 | **RIdGenerator** | ID 生成器（批量分配缓存） |
-| **RTransferQueue** | 跨队列原子迁移（单 Lua） |
+| **RTransferQueue / GetQueueTransfer** | **GO_ONLY** 跨队列原子迁移（非 Java RemoteService TransferQueue） |
 | **RHyperLogLog / RGeo / RBitSet / RStream** | 基数估计 / 地理索引（批量 GEO、GEOSEARCHSTORE）/ 分布式位图（Java 位序）/ 分布式日志（消费组、Pending、Claim/AutoClaim） |
 | **RPermitExpirableSemaphore / RReliableTopic** | 按许可独立租约过期的信号量 / Stream 可靠广播主题（每订阅者独立消费组 + 崩溃重投递） |
-| **RLocalCachedMap** | 近端缓存 Map（写穿 + 跨实例失效广播；数据层 RMap wire 格式，Java 可直读） |
+| **RLocalCachedMap** | 近端缓存 Map（写穿 + Go 失效广播；混部可用 `DisableNearCache`）；数据层 RMap wire |
 | **RPriorityQueue / RPriorityBlockingQueue / RPriorityBlockingDeque / RPriorityDeque** | ZSET+score 优先队列及阻塞/双端包装（**非** Java Comparator 同名协议） |
-| **RArray** | Redis 8.8+ ARRAY（ARSET/ARGET/…；命令缺失时测试 skip） |
-| **RClientSideCaching** | PARTIAL：`Config.ClientSideCaching` 或 `GetClientSideCachingWithOptions`（独立 RESP3 跟踪池）；非 Java EvictionPolicy 读代理 |
+| **RArray / RCircularBuffer** | Redis 8.8+ ARRAY；CircularBuffer 为稳定槽位环（≠ RingBuffer）；命令缺失 skip |
+| **RJsonBucket / RVectorSet / RSearch / RMaps** | RedisJSON / Vector Set / RediSearch 子集 / 批量 HASH 导入（模块缺失 skip） |
+| **RClientSideCaching** | PARTIAL：go-redis RESP3 TRACKING（standalone DB0）；非 Java EvictionPolicy |
 | **RLongAdder / RDoubleAdder** | 高争用计数器：本地零网络累积，`Sum()` 跨实例（含 Java）协同 flush；非破坏性 |
 | **RFencedLock / RMultiLock / RRedLock** | 栅栏令牌锁 / 多锁全有或全无 / RedLock 严格多数派（失败回滚） |
 | **RTimeSeries** | 时间序列（同刻多条、entry TTL、首尾读取/弹出、正反向范围，Redisson wire 兼容） |
 | **RRingBuffer / RShardedTopic / RFunction** | 定容环形缓冲（溢出淘汰最旧）/ Redis 7+ 分片 pub/sub（SSUBSCRIBE，cluster 友好）/ Redis Functions（FUNCTION/FCALL） |
-| **RKeys / RBuckets / RScript** | 键空间管理（SCAN/模式删除）/ 批量桶（MSET/MGET）/ Lua 脚本执行 |
+| **RKeys / RBuckets / RScript / GetRedisNodes** | 键空间 / 批量桶 / Lua / 拓扑探测 |
 | **RBatch** | 管道批处理（`NewBatch()` → 结构写操作入队 → `Execute()` 单次往返，实测 **~7x** 加速） |
 | **多拓扑** | single / cluster / sentinel（redis.UniversalClient） |
 | **TUI Dashboard** | 基于 charmbracelet/bubbles 的终端监控面板 |
+| **对齐路线** | 见 [演进方案.md](演进方案.md) 与 [COMPATIBILITY.md](COMPATIBILITY.md) 工厂总表 |
 
 值编码默认 `JSONCodec`：与 Redisson `JsonJacksonCodec` 互通（超 int32 的整数自动包裹 `["java.lang.Long",v]`，解码剥离 `@class` 类型信息），可通过 `Config.Codec` 替换。结构化读取可用 `GetInto` / `PeekInto` / `PollInto` / `Remove*Into`（`RBucket` / `RMap` / `RList` / `RQueue` / `RDeque` / `RLocalCachedMap`）绑定到类型化指针；`RMap` 另有 `PutAll` / `FastPut*` / `Replace*` / `Keys` / `Values`。
 
