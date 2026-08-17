@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **维护 e2e（二轮）**：补 Map/Set 键级同步器、DoubleAdder、MapCache GetInto/监听/驱逐、RedLock Wait、BQ PollWithTimeout、PriorityBlockingDeque、DelayedQueue Peek、List RemoveByIndex、RateLimiter keepAlive、LCM PutIfAbsent、BoundedBQ Put、BinaryStream Write 等；包语句覆盖率约 **75.5%**
 - **维护 e2e**：补 DelayedQueue / LexSortedSet / RateLimiter Acquire·Release / Stream Claim·Trim / LocalCachedMap 写表面 / BoundedBQ / 锁族状态与 Wait / 杂项低覆盖表面；包语句覆盖率约 **74.4%**
 - **IdGenerator 互操作修复**：范围分配 Lua 对齐 Redisson 4.6.1（返回 `[current,current+allocationSize)`，默认批量 5000）；修复 Go/Java 交错 `nextId` 在区间边界重复发号，并串行化同实例并发分配
 - **阶段 K（演进收官）**：Topic / Script / Buckets / Keys / Set / Queue / Set·List Multimap / DoubleAdder Java 双向互操作；e2e 补 Buckets/Script/Multimap；五语 README 与 COMPATIBILITY 校准为 **48** 个 `TestJavaInterop_*`；演进方案终章——对齐演进在不做清单内已完成，后续仅维护/按需方法级补齐
