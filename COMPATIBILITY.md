@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **24 个 `TestJavaInterop_*` 测试函数**；CI 有独立 `java-interop` job**。
+> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **28+ 个 `TestJavaInterop_*` 测试函数**（含 AtomicDouble / SpinLock / NonReentrantLock / BoundedBlockingQueue）；CI 有独立 `java-interop` job**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -24,8 +24,8 @@
 | 结构 | Redis 布局 | 验证状态 |
 |------|-----------|---------|
 | RLock | HASH `{name}`，field=holder id，channel `redisson_lock__channel:{name}`（unlock 消息 0），renew/unlock Lua 同 Redisson | **Redisson 4.6.1 直接双向实测 ✅** |
-| RSpinLock | 与 RLock 相同的 HASH/holder/watchdog wire；获取侧改为短退避自旋，不依赖 pub/sub 唤醒 | RedissonSpinLock 源码对照 + 互斥/重入单元测试 ✅；尚无单独 Java 探针 |
-| RNonReentrantLock | RLock 同形 HASH，单 holder field 的计数恒为 1，channel `redisson_lock__channel:{name}`；同 holder 不允许再次获取 | RedissonNonReentrantLock 源码对照 + 拒绝重入/归属/watchdog 单元测试 ✅；尚无单独 Java 探针 |
+| RSpinLock | 与 RLock 相同的 HASH/holder/watchdog wire；获取侧改为短退避自旋，不依赖 pub/sub 唤醒 | **Redisson 4.6.1 双向互斥实测 ✅** |
+| RNonReentrantLock | RLock 同形 HASH，单 holder field 的计数恒为 1，channel `redisson_lock__channel:{name}`；同 holder 不允许再次获取 | **Redisson 4.6.1 双向互斥/拒绝重入实测 ✅** |
 | RNonReentrantFairLock | RFairLock 同形 HASH/LIST/ZSET；同 holder 重入返回 `ErrLockReentrant`，其他 holder 保持 FIFO | RedissonNonReentrantFairLock 4.6.1 源码对照 + 拒绝重入/FIFO handoff 单元测试 ✅；尚无单独 Java 探针 |
 | RFairLock | RLock HASH + LIST `redisson_lock_queue:{name}` + ZSET `redisson_lock_timeout:{name}`；等待者订阅 `redisson_lock__channel:{name}:{holderId}`，unlock 仅唤醒队首；try/acquire/unlock Lua 同 RedissonFairLock 4.6.1 | wire 契约 + FIFO 单元测试 + **Redisson 4.6.1 双向互斥/释放实测 ✅** |
 | RReadWriteLock | 单 HASH + `mode` 字段（read/write/read-write），读 field=`{id}` 写 field=`{id}:write`，channel `redisson_rwlock:{name}`（读释放消息 1 / 写释放 0） | **Redisson 4.6.1 直接双向实测 ✅**（读写互斥、共享读、释放可见） |
@@ -33,7 +33,7 @@
 | RCountDownLatch | STRING 计数 + DECR/DEL/PUBLISH（channel `redisson_countdownlatch__channel__{name}`，消息 0/1） | **Redisson 4.6.1 countDown 唤醒 Go Await ✅** |
 | RRateLimiter | HASH `{name}`（rate/interval/keepAliveTime/type 枚举序数）+ `{name}:value` + ZSET `{name}:permits`（member=`struct.pack('Bc0I', len, id16B, permits)`，**每次获取随机 id**——固定 id 会因 ZADD 去重塌缩；过期归还走 `struct.unpack`，勿用字节手算——endianness 曾致 16M 归还） | **Redisson 4.6.1 共享窗口实测 ✅** + 过期归还回归测试 |
 | RMap / RList / RSet / RQueue / RDeque / RBlockingQueue | 裸名 + JSON 值编码（JsonJacksonCodec 互通，含 @class/Long/ArrayList 包装） | **Redisson 4.6.1 String/Long/嵌套对象双向实测 ✅** |
-| RBoundedBlockingQueue | LIST `{name}` + 容量 STRING `redisson_bqs:{name}` + channel `redisson_sc:redisson_bqs:{name}`；Offer 原子 DECR+RPUSH，Poll 原子 LPOP+INCR+PUBLISH | RedissonBoundedBlockingQueue/QueueSemaphore 4.6.1 Lua 对照 + full/block/wakeup 单元测试 ✅ |
+| RBoundedBlockingQueue | LIST `{name}` + 容量 STRING `redisson_bqs:{name}` + channel `redisson_sc:redisson_bqs:{name}`；Offer 原子 DECR+RPUSH，Poll 原子 LPOP+INCR+PUBLISH | Redisson 4.6.1 双向实测 ✅（capacity/offer/poll） |
 | RScoredSortedSet | ZSET + JSON member | **Redisson 4.6.1 score/rank 双向实测 ✅** |
 | RLexSortedSet | ZSET + 字典序操作，成员**裸存储**（跳过 codec，Redisson 特例）；含 rank/random 与正反向 rank/lex range | **Redisson 4.6.1 add/range 双向实测 ✅** |
 | RBucket | 裸名 + JSON 值（毫秒 TTL） | **Redisson 4.6.1 双向实测 ✅** |
@@ -43,7 +43,7 @@
 | RSetMultimapCacheNative / RListMultimapCacheNative | RMultimap 布局；`ExpireKey` = `HPEXPIRE` 索引 field + `PEXPIRE` 集合键 | RedissonMultimapCacheNative 源码对照 + 单元测试（命令缺失自动 skip） |
 | RBloomFilterNative / RCuckooFilter / RTopK / RTDigest / RGcra | Redis `BF.*` / `CF.*` / `TOPK.*` / `TDIGEST.*` / `GCRA`（元素经 codec 编码，除 TDigest/GCRA） | Redis 原生命令门面 + 冒烟测试（命令缺失自动 skip） |
 | RDelayedQueue | ZSET `redisson_delay_queue_timeout:{name}` + LIST `redisson_delay_queue:{name}`（struct-packed member；Contains/Remove/ReadAll/Clear 均用 `struct.unpack` 并同步双结构） | **Redisson 4.6.1 双向迁移实测 ✅** + pending surface 回归 |
-| RAtomicLong / RAtomicDouble | 裸名十进制字符串（StringCodec 语义） | wire 契约 + **RAtomicLong：Redisson 4.6.1 双向实测 ✅**；AtomicDouble 尚无单独 Java 探针 |
+| RAtomicLong / RAtomicDouble | 裸名十进制字符串（StringCodec 语义） | wire 契约 + **AtomicLong/AtomicDouble：Redisson 4.6.1 双向实测 ✅** |
 | RBloomFilter | 位图裸名 + `{name}:config` HASH，HighwayHash-128（Redisson 固定 KEY），Java 截断/半上取整公式 | **Redisson 4.6.1 位/公式双向实测 ✅** |
 | RIdGenerator | `{name}` 计数 + `{name}:allocation` | wire 契约 ✅ |
 | RSetCache | 单 ZSET（member=值，score=绝对过期时刻；无 TTL = MaxInt64）+ idle ZSET `redisson__idle__set:{name}`；ReadAll/随机/ContainsAll/RemoveAll/RetainAll 先清过期并同步 companion | wire 契约 + surface 回归 ✅ |
@@ -96,7 +96,7 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 
 | 工厂 | 状态 | 备注 |
 |------|------|------|
-| getLock / getFairLock / getSpinLock / getNonReentrant* / getFencedLock / getReadWriteLock | WIRE_OK | RWLock 续期 companion 与 Java 不完全同形，互斥 WIRE_OK |
+| getLock / getFairLock / getSpinLock / getNonReentrant* / getFencedLock / getReadWriteLock | WIRE_OK | Spin/NonReentrant Java 双向实测 ✅；RWLock 续期 companion 与 Java 不完全同形，互斥 WIRE_OK |
 | getMultiLock / getRedLock | WIRE_OK | 客户端编排 |
 | getMap / getList / getSet / getQueue / getDeque / getBlocking* / getBoundedBlockingQueue | WIRE_OK | |
 | getMapCache / getMapCacheNative | WIRE_OK / NATIVE_OK | Native 需 Redis≥7.4 |

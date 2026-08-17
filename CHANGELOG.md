@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **演进续作**：Java 探针补 AtomicDouble / SpinLock / NonReentrantLock / BoundedBlockingQueue 双向互操作；e2e 扩 Keys/Object/Batch/Queue/Stream/Topic 表面
 - **全面对齐演进方案**：重写 [演进方案.md](演进方案.md)；COMPATIBILITY 增加 RedissonClient 工厂一态总表；AGENTS 交叉引用
 - **阶段 A**：RateLimiter `SetRateWithKeepAlive` / config TTL 刷新；MultimapCache `StartAutoEviction`；锁族/AtomicDouble/BoundedBQ 对齐冒烟
 - **阶段 B**：`RJsonBucket`/`RJsonBuckets`、`RVectorSet`、`RSearch`（模块缺失 skip）

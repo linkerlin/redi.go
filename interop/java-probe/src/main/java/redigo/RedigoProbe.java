@@ -2,9 +2,11 @@ package redigo;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.redisson.Redisson;
+import org.redisson.api.RAtomicDouble;
 import org.redisson.api.RAtomicLong;
 import org.redisson.api.RBinaryStream;
 import org.redisson.api.RBloomFilter;
+import org.redisson.api.RBoundedBlockingQueue;
 import org.redisson.api.RBucket;
 import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RCountDownLatch;
@@ -45,6 +47,8 @@ public final class RedigoProbe {
     private static final ObjectMapper OM = new ObjectMapper();
     private static RLock heldLock;
     private static RLock heldFair;
+    private static RLock heldSpin;
+    private static RLock heldNonReentrant;
     private static RReadWriteLock heldRwLock;
     private static org.redisson.api.RFencedLock heldFenced;
     private static String heldPermit;
@@ -474,6 +478,76 @@ public final class RedigoProbe {
             case "along_get" -> {
                 RAtomicLong al = rs.getAtomicLong(a[1]);
                 reply(map("value", al.get()));
+            }
+
+            case "adouble_add" -> {
+                RAtomicDouble ad = rs.getAtomicDouble(a[1]);
+                reply(map("value", ad.addAndGet(Double.parseDouble(a[2]))));
+            }
+            case "adouble_get" -> {
+                RAtomicDouble ad = rs.getAtomicDouble(a[1]);
+                reply(map("value", ad.get()));
+            }
+
+            case "spin_hold" -> {
+                RLock l = rs.getSpinLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                heldSpin = acq ? l : null;
+                reply(map("acquired", acq));
+            }
+            case "spin_try" -> {
+                RLock l = rs.getSpinLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                if (acq) {
+                    l.unlock();
+                }
+                reply(map("acquired", acq));
+            }
+            case "spin_release" -> {
+                if (heldSpin != null && heldSpin.isHeldByCurrentThread()) {
+                    heldSpin.unlock();
+                }
+                heldSpin = null;
+                reply(map("ok", true));
+            }
+
+            case "nrl_hold" -> {
+                RLock l = rs.getNonReentrantLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                heldNonReentrant = acq ? l : null;
+                reply(map("acquired", acq));
+            }
+            case "nrl_try" -> {
+                RLock l = rs.getNonReentrantLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                if (acq) {
+                    l.unlock();
+                }
+                reply(map("acquired", acq));
+            }
+            case "nrl_release" -> {
+                if (heldNonReentrant != null && heldNonReentrant.isHeldByCurrentThread()) {
+                    heldNonReentrant.unlock();
+                }
+                heldNonReentrant = null;
+                reply(map("ok", true));
+            }
+
+            case "bbq_capacity" -> {
+                RBoundedBlockingQueue<Object> q = rs.getBoundedBlockingQueue(a[1]);
+                reply(map("ok", q.trySetCapacity(Integer.parseInt(a[2]))));
+            }
+            case "bbq_offer" -> {
+                RBoundedBlockingQueue<Object> q = rs.getBoundedBlockingQueue(a[1]);
+                reply(map("ok", q.offer(OM.readValue(a[2], Object.class))));
+            }
+            case "bbq_poll" -> {
+                RBoundedBlockingQueue<Object> q = rs.getBoundedBlockingQueue(a[1]);
+                reply(map("value", q.poll()));
+            }
+            case "bbq_size" -> {
+                RBoundedBlockingQueue<Object> q = rs.getBoundedBlockingQueue(a[1]);
+                reply(map("size", q.size()));
             }
 
             case "bloom_init" -> {
