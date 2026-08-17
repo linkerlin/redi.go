@@ -45,7 +45,7 @@
 | RDelayedQueue | ZSET `redisson_delay_queue_timeout:{name}` + LIST `redisson_delay_queue:{name}`（struct-packed member；Contains/Remove/ReadAll/Clear 均用 `struct.unpack` 并同步双结构） | **Redisson 4.6.1 双向迁移实测 ✅** + pending surface 回归 |
 | RAtomicLong / RAtomicDouble | 裸名十进制字符串（StringCodec 语义） | wire 契约 + **AtomicLong/AtomicDouble：Redisson 4.6.1 双向实测 ✅** |
 | RBloomFilter | 位图裸名 + `{name}:config` HASH，HighwayHash-128（Redisson 固定 KEY），Java 截断/半上取整公式 | **Redisson 4.6.1 位/公式双向实测 ✅** |
-| RIdGenerator | `{name}` 计数 + `{name}:allocation` | wire 契约 ✅ |
+| RIdGenerator | `{name}` 计数 + `{name}:allocation`；分配区间 `[current,current+allocationSize)`，默认批量 5000 | wire 契约 + **Redisson 4.6.1 alloc=1 交错发号双向实测 ✅** |
 | RSetCache | 单 ZSET（member=值，score=绝对过期时刻；无 TTL = MaxInt64）+ idle ZSET `redisson__idle__set:{name}`；ReadAll/随机/ContainsAll/RemoveAll/RetainAll 先清过期并同步 companion | wire 契约 + surface 回归 ✅ |
 | RMultimap（Set/List） | HASH `{name}`（field=JSON key → 内部 ID）+ 集合 `{name}:{id}`；ID = HighwayHash-128 大端 + 无填充 base64（Java `Hash.hash128toBase64`） | wire 契约 + **redi.py 内部 ID 字节级 + 双向读写实测 ✅** |
 | RSetMultimapCache / RListMultimapCache | RMultimap 布局 + ZSET `{name}:redisson_{set\|list}_multimap_ttl`（member=JSON key，score=绝对到期毫秒）；过期读取惰性删除 HASH/collection/ZSET | Redisson 4.6.1 Lua/命名对照 + set/list TTL/顺序/淘汰单元测试 ✅ |

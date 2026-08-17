@@ -9,42 +9,27 @@ import (
 func TestJavaInterop_RIdGenerator(t *testing.T) {
 	javaProbe(t)
 	client := newTestClient(t)
-	rc := rawClient(t)
 	name := uniqueKey(t, "jio-idgen")
 	alloc := "{" + name + "}:allocation"
 	t.Cleanup(func() { interopCleanup(t, name, alloc) })
 	g := client.GetIdGenerator(name)
 
-	if reply, err := javaSend("idgen_init " + name + " 100 50"); err != nil || reply["ok"] != true {
+	if reply, err := javaSend("idgen_init " + name + " 0 1"); err != nil || reply["ok"] != true {
 		t.Fatalf("java init = %v, %v", reply, err)
 	}
-	cur, err := rc.Get(testCtx, name).Result()
-	if err != nil || cur != "100" {
-		t.Fatalf("counter after Java = %q, %v; want 100", cur, err)
+	if reply, err := javaSend("idgen_next " + name); err != nil || !numEq(reply["id"], 0) {
+		t.Fatalf("java first id = %v, %v; want 0", reply, err)
 	}
-	av, err := rc.Get(testCtx, alloc).Result()
-	if err != nil || av != "50" {
-		t.Fatalf("allocation after Java = %q, %v; want 50", av, err)
+	id, err := g.NextID(testCtx)
+	if err != nil || id != 1 {
+		t.Fatalf("Go id = %d, %v; want 1", id, err)
 	}
-	ok, err := g.TryInit(testCtx, 100, 50)
-	if err != nil || ok {
-		t.Fatalf("Go TryInit after Java = %v, %v; want false", ok, err)
+	if reply, err := javaSend("idgen_next " + name); err != nil || !numEq(reply["id"], 2) {
+		t.Fatalf("java second id = %v, %v; want 2", reply, err)
 	}
-
-	// Reverse layout: Go init, Java refuses re-init, Redis keys intact.
-	name2 := uniqueKey(t, "jio-idgen2")
-	alloc2 := "{" + name2 + "}:allocation"
-	t.Cleanup(func() { interopCleanup(t, name2, alloc2) })
-	g2 := client.GetIdGenerator(name2)
-	if ok, err := g2.TryInit(testCtx, 7, 20); err != nil || !ok {
-		t.Fatalf("Go TryInit = %v, %v", ok, err)
-	}
-	if reply, err := javaSend("idgen_init " + name2 + " 7 20"); err != nil || reply["ok"] != false {
-		t.Fatalf("java re-init = %v, %v; want ok=false", reply, err)
-	}
-	cur, err = rc.Get(testCtx, name2).Result()
-	if err != nil || cur != "7" {
-		t.Fatalf("counter after Go = %q, %v", cur, err)
+	id, err = g.NextID(testCtx)
+	if err != nil || id != 3 {
+		t.Fatalf("Go second id = %d, %v; want 3", id, err)
 	}
 }
 

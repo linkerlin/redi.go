@@ -1,6 +1,7 @@
 package redi_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -46,8 +47,11 @@ func TestRBloomFilter(t *testing.T) {
 
 func TestRIdGenerator(t *testing.T) {
 	client := newTestClient(t)
-	g := client.GetIdGenerator(uniqueKey(t, "idgen"))
-	defer g.Delete(testCtx) //nolint:errcheck
+	name := uniqueKey(t, "idgen")
+	alloc := "{" + name + "}:allocation"
+	interopCleanup(t, name, alloc)
+	t.Cleanup(func() { interopCleanup(t, name, alloc) })
+	g := client.GetIdGenerator(name)
 
 	if _, err := g.TryInit(testCtx, 0, 5); err != nil {
 		t.Fatal("TryInit:", err)
@@ -71,6 +75,57 @@ func TestRIdGenerator(t *testing.T) {
 	}
 	if len(ids) != 7 {
 		t.Fatalf("NextIDs len = %d, want 7", len(ids))
+	}
+}
+
+func TestRIdGeneratorConcurrent(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "idgen-concurrent")
+	alloc := "{" + name + "}:allocation"
+	interopCleanup(t, name, alloc)
+	t.Cleanup(func() { interopCleanup(t, name, alloc) })
+	g := client.GetIdGenerator(name)
+	if ok, err := g.TryInit(testCtx, 0, 3); err != nil || !ok {
+		t.Fatalf("TryInit = %v, %v", ok, err)
+	}
+
+	const workers = 32
+	ids := make(chan int64, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, err := g.NextID(testCtx)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- id
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	seen := make(map[int64]struct{}, workers)
+	for id := range ids {
+		if _, exists := seen[id]; exists {
+			t.Fatalf("duplicate id %d", id)
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != workers {
+		t.Fatalf("got %d ids, want %d", len(seen), workers)
+	}
+	if err := g.Delete(testCtx); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := client.Redis().Exists(testCtx, name, alloc).Result(); err != nil || n != 0 {
+		t.Fatalf("Delete left %d keys, %v", n, err)
 	}
 }
 

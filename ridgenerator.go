@@ -14,6 +14,7 @@ type RIdGenerator struct {
 	rObject
 
 	mu          sync.Mutex
+	allocMu     sync.Mutex
 	allocLoaded bool
 	allocSize   int64
 	nextID      int64
@@ -23,42 +24,55 @@ type RIdGenerator struct {
 func newRIdGenerator(c *Client, name string) *RIdGenerator {
 	return &RIdGenerator{
 		rObject:   rObject{c: c, name: name},
-		allocSize: 1000,
+		allocSize: 5000,
 	}
 }
 
+var idInitScript = redis.NewScript(`
+redis.call('setnx', KEYS[1], ARGV[1])
+return redis.call('setnx', KEYS[2], ARGV[2])
+`)
+
 var idAllocateScript = redis.NewScript(`
-local key = KEYS[1]
-local allocation_size = tonumber(ARGV[1])
-local current = redis.call('get', key)
-if current == false then
-    current = 0
+local allocation_size = redis.call('get', KEYS[2])
+if allocation_size == false then
+    allocation_size = 5000
+    redis.call('set', KEYS[2], allocation_size)
 else
-    current = tonumber(current)
+    allocation_size = tonumber(allocation_size)
 end
-local next_val = current + allocation_size
-redis.call('set', key, next_val)
-return {current + 1, next_val}
+local value = redis.call('get', KEYS[1])
+if value == false then
+    redis.call('incr', KEYS[1])
+    value = 1
+else
+    value = tonumber(value)
+end
+redis.call('incrby', KEYS[1], allocation_size)
+return {value, allocation_size}
 `)
 
 func (g *RIdGenerator) allocationKey() string {
 	return suffixName(g.name, "allocation")
 }
 
+// Delete removes both the counter and its allocation-size companion.
+func (g *RIdGenerator) Delete(ctx context.Context) error {
+	return g.rc().Del(ctx, g.name, g.allocationKey()).Err()
+}
+
 // TryInit sets the initial value and allocation size once.
 func (g *RIdGenerator) TryInit(ctx context.Context, value, allocationSize int64) (bool, error) {
-	ok, err := g.rc().SetNX(ctx, g.name, value, 0).Result()
-	if err != nil || !ok {
-		return false, err
-	}
-	if err := g.rc().Set(ctx, g.allocationKey(), allocationSize, 0).Err(); err != nil {
+	n, err := idInitScript.Run(ctx, g.rc(),
+		[]string{g.name, g.allocationKey()}, value, allocationSize).Int()
+	if err != nil {
 		return false, err
 	}
 	g.mu.Lock()
 	g.allocSize = allocationSize
 	g.allocLoaded = true
 	g.mu.Unlock()
-	return true, nil
+	return n == 1, nil
 }
 
 func (g *RIdGenerator) loadAllocation(ctx context.Context) error {
@@ -86,10 +100,8 @@ func (g *RIdGenerator) loadAllocation(ctx context.Context) error {
 }
 
 func (g *RIdGenerator) allocate(ctx context.Context) error {
-	g.mu.Lock()
-	size := g.allocSize
-	g.mu.Unlock()
-	res, err := idAllocateScript.Run(ctx, g.rc(), []string{g.name}, size).Result()
+	res, err := idAllocateScript.Run(ctx, g.rc(),
+		[]string{g.name, g.allocationKey()}).Result()
 	if err != nil {
 		return err
 	}
@@ -97,14 +109,15 @@ func (g *RIdGenerator) allocate(ctx context.Context) error {
 	if !ok || len(pair) != 2 {
 		return ErrIDAlloc
 	}
-	lo, ok1 := pair[0].(int64)
-	hi, ok2 := pair[1].(int64)
+	start, ok1 := pair[0].(int64)
+	size, ok2 := pair[1].(int64)
 	if !ok1 || !ok2 {
 		return ErrIDAlloc
 	}
 	g.mu.Lock()
-	g.nextID = lo
-	g.maxID = hi
+	g.allocSize = size
+	g.nextID = start
+	g.maxID = start + size
 	g.mu.Unlock()
 	return nil
 }
@@ -114,19 +127,28 @@ func (g *RIdGenerator) NextID(ctx context.Context) (int64, error) {
 	if err := g.loadAllocation(ctx); err != nil {
 		return 0, err
 	}
-	g.mu.Lock()
-	needAlloc := g.nextID >= g.maxID
-	g.mu.Unlock()
-	if needAlloc {
-		if err := g.allocate(ctx); err != nil {
-			return 0, err
+	for {
+		g.mu.Lock()
+		if g.nextID < g.maxID {
+			id := g.nextID
+			g.nextID++
+			g.mu.Unlock()
+			return id, nil
 		}
+		g.mu.Unlock()
+
+		g.allocMu.Lock()
+		g.mu.Lock()
+		needAlloc := g.nextID >= g.maxID
+		g.mu.Unlock()
+		if needAlloc {
+			if err := g.allocate(ctx); err != nil {
+				g.allocMu.Unlock()
+				return 0, err
+			}
+		}
+		g.allocMu.Unlock()
 	}
-	g.mu.Lock()
-	id := g.nextID
-	g.nextID++
-	g.mu.Unlock()
-	return id, nil
 }
 
 // NextIDs allocates count ids in batches.
@@ -134,6 +156,8 @@ func (g *RIdGenerator) NextIDs(ctx context.Context, count int) ([]int64, error) 
 	if err := g.loadAllocation(ctx); err != nil {
 		return nil, err
 	}
+	g.allocMu.Lock()
+	defer g.allocMu.Unlock()
 	ids := make([]int64, 0, count)
 	for len(ids) < count {
 		g.mu.Lock()
