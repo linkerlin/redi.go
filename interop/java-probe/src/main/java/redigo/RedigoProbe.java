@@ -16,6 +16,7 @@ import org.redisson.api.RList;
 import org.redisson.api.RLock;
 import org.redisson.api.RMap;
 import org.redisson.api.RMapCache;
+import org.redisson.api.RMapCacheNative;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RReadWriteLock;
 import org.redisson.api.RScoredSortedSet;
@@ -49,6 +50,7 @@ public final class RedigoProbe {
     private static RLock heldFair;
     private static RLock heldSpin;
     private static RLock heldNonReentrant;
+    private static RLock heldNonReentrantFair;
     private static RReadWriteLock heldRwLock;
     private static org.redisson.api.RFencedLock heldFenced;
     private static String heldPermit;
@@ -531,6 +533,39 @@ public final class RedigoProbe {
                 }
                 heldNonReentrant = null;
                 reply(map("ok", true));
+            }
+
+            case "nrf_hold" -> {
+                RLock l = rs.getNonReentrantFairLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                heldNonReentrantFair = acq ? l : null;
+                reply(map("acquired", acq));
+            }
+            case "nrf_try" -> {
+                RLock l = rs.getNonReentrantFairLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                if (acq) {
+                    l.unlock();
+                }
+                reply(map("acquired", acq));
+            }
+            case "nrf_release" -> {
+                if (heldNonReentrantFair != null && heldNonReentrantFair.isHeldByCurrentThread()) {
+                    heldNonReentrantFair.unlock();
+                }
+                heldNonReentrantFair = null;
+                reply(map("ok", true));
+            }
+
+            case "mcn_put" -> {
+                RMapCacheNative<Object, Object> m = rs.getMapCacheNative(a[1]);
+                m.put(OM.readValue(a[2], Object.class), OM.readValue(a[3], Object.class),
+                        java.time.Duration.ofMillis(Long.parseLong(a[4])));
+                reply(map("ok", true));
+            }
+            case "mcn_get" -> {
+                RMapCacheNative<Object, Object> m = rs.getMapCacheNative(a[1]);
+                reply(map("value", m.get(OM.readValue(a[2], Object.class))));
             }
 
             case "bbq_capacity" -> {

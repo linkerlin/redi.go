@@ -110,3 +110,36 @@ func TestE2E_QueueStreamTopic_Gaps(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestE2E_ClientOpsAndMultiLockAlias(t *testing.T) {
+	client := newTestClient(t)
+	if id := client.ID(); id == "" {
+		t.Fatal("ID empty")
+	}
+	if len(client.Config().Addrs) == 0 {
+		t.Fatal("Config.Addrs empty")
+	}
+	nodes := client.GetRedisNodes()
+	if nodes == nil {
+		t.Fatal("GetRedisNodes nil")
+	}
+	if err := nodes.Ping(testCtx); err != nil {
+		t.Fatal(err)
+	}
+	if nodes.String() == "" {
+		t.Fatal("RedisNodes.String empty")
+	}
+
+	a := uniqueKey(t, "ml-a")
+	b := uniqueKey(t, "ml-b")
+	t.Cleanup(func() { interopCleanup(t, a, b) })
+	ml := client.GetMultiLock(client.GetLock(a), client.GetLock(b))
+	holder := client.HolderID("1")
+	ok, err := ml.TryLock(testCtx, holder, time.Second)
+	if err != nil || !ok {
+		t.Fatalf("GetMultiLock TryLock = %v, %v", ok, err)
+	}
+	if err := ml.Unlock(testCtx, holder); err != nil {
+		t.Fatal(err)
+	}
+}

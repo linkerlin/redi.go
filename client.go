@@ -479,6 +479,11 @@ func (c *Client) NewMultiLock(locks ...*RLock) *RMultiLock {
 	return &RMultiLock{locks: locks}
 }
 
+// GetMultiLock is the Redisson-style alias for NewMultiLock.
+func (c *Client) GetMultiLock(locks ...*RLock) *RMultiLock {
+	return c.NewMultiLock(locks...)
+}
+
 // NewRedLock groups independent RLocks using RedissonRedLock majority rules.
 func (c *Client) NewRedLock(locks ...*RLock) *RRedLock {
 	return &RRedLock{locks: locks}

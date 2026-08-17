@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **阶段 G**：NonReentrantFairLock / MapCacheNative Java 双向互操作；`GetMultiLock` 别名；演进方案阶段表续写
 - **多语言 README**：新增 [Français](README_FR.md) / [日本語](README_JA.md) / [한국어](README_KO.md)；中英及各语种顶部互链
 - **演进续作**：Java 探针补 AtomicDouble / SpinLock / NonReentrantLock / BoundedBlockingQueue 双向互操作；e2e 扩 Keys/Object/Batch/Queue/Stream/Topic 表面
 - **全面对齐演进方案**：重写 [演进方案.md](演进方案.md)；COMPATIBILITY 增加 RedissonClient 工厂一态总表；AGENTS 交叉引用
