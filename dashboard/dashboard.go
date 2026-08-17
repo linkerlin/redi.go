@@ -431,7 +431,7 @@ func fetchLimiters(rc redis.UniversalClient) tea.Cmd {
 func buildLockRows(locks []lockSample) []table.Row {
 	rows := make([]table.Row, 0, len(locks))
 	if len(locks) == 0 {
-		return []table.Row{{"(no locks matched redi:lock:*)", ""}}
+		return []table.Row{{"(no locks matched scan patterns)", ""}}
 	}
 	for _, l := range locks {
 		ttl := "no expiry"

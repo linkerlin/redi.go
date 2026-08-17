@@ -70,6 +70,36 @@ func TestRSemaphore_BlockingAcquireWakes(t *testing.T) {
 	}
 }
 
+func TestRSemaphore_TryAcquireWait(t *testing.T) {
+	client := newTestClient(t)
+	s := client.GetSemaphore(uniqueKey(t, "semwait"))
+	defer s.Delete(testCtx) //nolint:errcheck
+
+	if _, err := s.TrySetPermits(testCtx, 0); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.TryAcquireWait(testCtx, 1, 100*time.Millisecond); err != nil || ok {
+		t.Fatalf("TryAcquireWait timeout = %v, %v", ok, err)
+	}
+
+	acquired := make(chan bool, 1)
+	go func() {
+		ok, _ := s.TryAcquireWait(context.Background(), 1, 2*time.Second)
+		acquired <- ok
+	}()
+	if err := s.Release(testCtx, 1); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ok := <-acquired:
+		if !ok {
+			t.Fatal("TryAcquireWait returned false after Release")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("TryAcquireWait did not return after Release")
+	}
+}
+
 func TestRCountDownLatch(t *testing.T) {
 	client := newTestClient(t)
 	l := client.GetCountDownLatch(uniqueKey(t, "cdl"))

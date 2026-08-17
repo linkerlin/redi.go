@@ -13,6 +13,12 @@ type RGeo struct {
 	rObject
 }
 
+// GeoLocation describes one member and its longitude/latitude.
+type GeoLocation struct {
+	Lon, Lat float64
+	Member   any
+}
+
 func newRGeo(c *Client, name string) *RGeo {
 	return &RGeo{rObject{c: c, name: name}}
 }
@@ -31,6 +37,26 @@ func (g *RGeo) Add(ctx context.Context, longitude, latitude float64, member any)
 	return n > 0, err
 }
 
+// AddMany stores all locations and returns the number of newly added members.
+func (g *RGeo) AddMany(ctx context.Context, locations []GeoLocation) (int64, error) {
+	if len(locations) == 0 {
+		return 0, nil
+	}
+	values := make([]*redis.GeoLocation, len(locations))
+	for i, location := range locations {
+		enc, err := g.enc(location.Member)
+		if err != nil {
+			return 0, err
+		}
+		values[i] = &redis.GeoLocation{
+			Longitude: location.Lon,
+			Latitude:  location.Lat,
+			Name:      enc,
+		}
+	}
+	return g.rc().GeoAdd(ctx, g.name, values...).Result()
+}
+
 // TryAdd stores a member only when absent (GEOADD NX, atomic via Lua —
 // go-redis does not expose the NX flag).
 var geoAddNXScript = redis.NewScript(`
@@ -46,6 +72,28 @@ func (g *RGeo) TryAdd(ctx context.Context, longitude, latitude float64, member a
 		return false, err
 	}
 	n, err := geoAddNXScript.Run(ctx, g.rc(), []string{g.name},
+		formatFloat(longitude), formatFloat(latitude), enc).Int()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+var geoAddXXScript = redis.NewScript(`
+if redis.call('zscore', KEYS[1], ARGV[3]) == false then
+    return 0
+end
+redis.call('geoadd', KEYS[1], 'XX', ARGV[1], ARGV[2], ARGV[3])
+return 1
+`)
+
+// AddIfExists updates a member only when it already exists (GEOADD XX).
+func (g *RGeo) AddIfExists(ctx context.Context, longitude, latitude float64, member any) (bool, error) {
+	enc, err := g.enc(member)
+	if err != nil {
+		return false, err
+	}
+	n, err := geoAddXXScript.Run(ctx, g.rc(), []string{g.name},
 		formatFloat(longitude), formatFloat(latitude), enc).Int()
 	if err != nil {
 		return false, err
@@ -83,6 +131,32 @@ func (g *RGeo) Pos(ctx context.Context, member any) ([]float64, error) {
 	return []float64{pos[0].Longitude, pos[0].Latitude}, nil
 }
 
+// PosMany returns positions aligned with members; missing members yield nil.
+func (g *RGeo) PosMany(ctx context.Context, members ...any) ([][]float64, error) {
+	if len(members) == 0 {
+		return [][]float64{}, nil
+	}
+	encoded := make([]string, len(members))
+	for i, member := range members {
+		enc, err := g.enc(member)
+		if err != nil {
+			return nil, err
+		}
+		encoded[i] = enc
+	}
+	positions, err := g.rc().GeoPos(ctx, g.name, encoded...).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]float64, len(positions))
+	for i, position := range positions {
+		if position != nil {
+			out[i] = []float64{position.Longitude, position.Latitude}
+		}
+	}
+	return out, nil
+}
+
 // Hash returns the geohash of a member ("" when missing).
 func (g *RGeo) Hash(ctx context.Context, member any) (string, error) {
 	enc, err := g.enc(member)
@@ -94,6 +168,22 @@ func (g *RGeo) Hash(ctx context.Context, member any) (string, error) {
 		return "", err
 	}
 	return hashes[0], nil
+}
+
+// HashMany returns geohashes aligned with members; missing members yield "".
+func (g *RGeo) HashMany(ctx context.Context, members ...any) ([]string, error) {
+	if len(members) == 0 {
+		return []string{}, nil
+	}
+	encoded := make([]string, len(members))
+	for i, member := range members {
+		enc, err := g.enc(member)
+		if err != nil {
+			return nil, err
+		}
+		encoded[i] = enc
+	}
+	return g.rc().GeoHash(ctx, g.name, encoded...).Result()
 }
 
 // GeoEntry is one search result.
@@ -153,6 +243,21 @@ func (g *RGeo) SearchByMember(ctx context.Context, member any, radius float64, u
 		return nil, err
 	}
 	return g.toEntriesLoc(locs), nil
+}
+
+// StoreSearchTo stores members within radius in dest and returns the count.
+func (g *RGeo) StoreSearchTo(ctx context.Context, dest string, longitude, latitude, radius float64,
+	unit string, count int) (int64, error) {
+	q := &redis.GeoSearchStoreQuery{
+		GeoSearchQuery: redis.GeoSearchQuery{
+			Longitude:  longitude,
+			Latitude:   latitude,
+			Radius:     radius,
+			RadiusUnit: unit,
+			Count:      count,
+		},
+	}
+	return g.rc().GeoSearchStore(ctx, g.name, dest, q).Result()
 }
 
 func (g *RGeo) toEntriesLoc(locs []redis.GeoLocation) []GeoEntry {

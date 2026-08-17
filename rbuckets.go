@@ -3,6 +3,8 @@ package redi
 import (
 	"context"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // RBuckets performs batch operations across multiple bucket keys
@@ -12,6 +14,20 @@ type RBuckets struct {
 }
 
 func newRBuckets(c *Client) *RBuckets { return &RBuckets{c: c} }
+
+var bucketsSetIfScript = redis.NewScript(`
+for i = 1, #KEYS do
+    local exists = redis.call('exists', KEYS[i])
+    if (ARGV[1] == 'XX' and exists == 0)
+            or (ARGV[1] == 'NX' and exists == 1) then
+        return 0
+    end
+end
+for i = 1, #KEYS do
+    redis.call('set', KEYS[i], ARGV[i + 1])
+end
+return 1
+`)
 
 // Get returns the existing values for the given keys (missing keys omitted).
 func (b *RBuckets) Get(ctx context.Context, keys ...string) (map[string]any, error) {
@@ -73,4 +89,36 @@ func (b *RBuckets) TrySet(ctx context.Context, mapping map[string]any) (bool, er
 		encoded[k] = enc
 	}
 	return b.c.rc.MSetNX(ctx, encoded).Result()
+}
+
+func (b *RBuckets) setIf(ctx context.Context, mapping map[string]any, mode string) (bool, error) {
+	if len(mapping) == 0 {
+		return false, nil
+	}
+	keys := make([]string, 0, len(mapping))
+	args := make([]any, 1, len(mapping)+1)
+	args[0] = mode
+	for key, value := range mapping {
+		encoded, err := b.c.codec.Encode(value)
+		if err != nil {
+			return false, err
+		}
+		keys = append(keys, key)
+		args = append(args, encoded)
+	}
+	n, err := bucketsSetIfScript.Run(ctx, b.c.rc, keys, args...).Int()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// SetIfAllKeysExist stores all values only when every key already exists.
+func (b *RBuckets) SetIfAllKeysExist(ctx context.Context, mapping map[string]any) (bool, error) {
+	return b.setIf(ctx, mapping, "XX")
+}
+
+// SetIfAllKeysAbsent stores all values only when no key exists.
+func (b *RBuckets) SetIfAllKeysAbsent(ctx context.Context, mapping map[string]any) (bool, error) {
+	return b.setIf(ctx, mapping, "NX")
 }

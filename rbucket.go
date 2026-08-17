@@ -59,6 +59,15 @@ func (b *RBucket) SetWithTTL(ctx context.Context, value any, ttl time.Duration) 
 	return b.rc().Set(ctx, b.name, enc, ttl).Err()
 }
 
+// SetAndKeepTTL replaces the value without changing its existing TTL.
+func (b *RBucket) SetAndKeepTTL(ctx context.Context, value any) error {
+	enc, err := b.c.codec.Encode(value)
+	if err != nil {
+		return err
+	}
+	return b.rc().SetArgs(ctx, b.name, enc, redis.SetArgs{KeepTTL: true}).Err()
+}
+
 // GetAndSet replaces the value and returns the previous one.
 func (b *RBucket) GetAndSet(ctx context.Context, value any) (any, error) {
 	enc, err := b.c.codec.Encode(value)
@@ -66,6 +75,24 @@ func (b *RBucket) GetAndSet(ctx context.Context, value any) (any, error) {
 		return nil, err
 	}
 	v, err := b.rc().GetSet(ctx, b.name, enc).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return b.c.codec.Decode(v)
+}
+
+// GetAndSetWithTTL replaces the value with a TTL and returns the previous one.
+func (b *RBucket) GetAndSetWithTTL(ctx context.Context, value any, ttl time.Duration) (any, error) {
+	enc, err := b.c.codec.Encode(value)
+	if err != nil {
+		return nil, err
+	}
+	v, err := bucketGetAndSetTTLScript.Run(
+		ctx, b.rc(), []string{b.name}, enc, ttl.Milliseconds(),
+	).Text()
 	if err == redis.Nil {
 		return nil, nil
 	}
@@ -96,6 +123,15 @@ func (b *RBucket) TrySet(ctx context.Context, value any) (bool, error) {
 	return b.rc().SetNX(ctx, b.name, enc, 0).Result()
 }
 
+// TrySetWithTTL sets the value with a TTL only when absent (SET NX).
+func (b *RBucket) TrySetWithTTL(ctx context.Context, value any, ttl time.Duration) (bool, error) {
+	enc, err := b.c.codec.Encode(value)
+	if err != nil {
+		return false, err
+	}
+	return b.rc().SetNX(ctx, b.name, enc, ttl).Result()
+}
+
 // SetIfExists sets the value only when the key exists (SET XX).
 func (b *RBucket) SetIfExists(ctx context.Context, value any) (bool, error) {
 	enc, err := b.c.codec.Encode(value)
@@ -103,6 +139,20 @@ func (b *RBucket) SetIfExists(ctx context.Context, value any) (bool, error) {
 		return false, err
 	}
 	return b.rc().SetXX(ctx, b.name, enc, 0).Result()
+}
+
+// SetIfExistsWithTTL sets the value with a TTL only when the key exists.
+func (b *RBucket) SetIfExistsWithTTL(ctx context.Context, value any, ttl time.Duration) (bool, error) {
+	enc, err := b.c.codec.Encode(value)
+	if err != nil {
+		return false, err
+	}
+	return b.rc().SetXX(ctx, b.name, enc, ttl).Result()
+}
+
+// Size returns the encoded value length in bytes (STRLEN).
+func (b *RBucket) Size(ctx context.Context) (int64, error) {
+	return b.rc().StrLen(ctx, b.name).Result()
 }
 
 // CompareAndSet atomically replaces the value when it equals expect.
@@ -124,11 +174,34 @@ func (b *RBucket) CompareAndSet(ctx context.Context, expect, update any) (bool, 
 	return n == 1, err
 }
 
+// CompareAndDelete atomically deletes the value when it equals expect.
+func (b *RBucket) CompareAndDelete(ctx context.Context, expect any) (bool, error) {
+	encExpect, err := b.c.codec.Encode(expect)
+	if err != nil {
+		return false, err
+	}
+	n, err := bucketCompareDeleteScript.Run(ctx, b.rc(), []string{b.name}, encExpect).Int()
+	return n == 1, err
+}
+
+var bucketGetAndSetTTLScript = redis.NewScript(`
+local old = redis.call('get', KEYS[1])
+redis.call('set', KEYS[1], ARGV[1], 'px', ARGV[2])
+return old
+`)
+
 var bucketCASScript = redis.NewScript(`
 local cur = redis.call('get', KEYS[1])
 if cur == ARGV[1] then
     redis.call('set', KEYS[1], ARGV[2])
     return 1
+end
+return 0
+`)
+
+var bucketCompareDeleteScript = redis.NewScript(`
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
 end
 return 0
 `)

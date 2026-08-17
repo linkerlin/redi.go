@@ -90,6 +90,22 @@ func (r *RRateLimiter) permitsKey() string {
 	return suffixName(r.name, "permits")
 }
 
+func (r *RRateLimiter) overallValueKey() string {
+	return suffixName(r.name, "value")
+}
+
+func (r *RRateLimiter) clientValueKey() string {
+	return r.overallValueKey() + ":" + r.c.id
+}
+
+func (r *RRateLimiter) overallPermitsKey() string {
+	return suffixName(r.name, "permits")
+}
+
+func (r *RRateLimiter) clientPermitsKey() string {
+	return r.overallPermitsKey() + ":" + r.c.id
+}
+
 func (r *RRateLimiter) ensureConfig(ctx context.Context) error {
 	if r.cfgLoaded {
 		return nil
@@ -123,17 +139,60 @@ func (r *RRateLimiter) TrySetRate(ctx context.Context, rateType RateType, rate i
 // SetRate (over)writes the persisted rate config.
 func (r *RRateLimiter) SetRate(ctx context.Context, rateType RateType, rate int64, interval time.Duration) error {
 	intervalMs := interval.Milliseconds()
-	if _, err := r.rc().HSet(ctx, r.name, map[string]any{
-		"rate":          rate,
-		"interval":      intervalMs,
-		"keepAliveTime": 0,
-		"type":          int(rateType),
-	}).Result(); err != nil {
+	_, err := rateSetScript.Run(ctx, r.rc(), r.rateKeys(),
+		rate, intervalMs, int(rateType), 0).Int()
+	if err != nil {
 		return err
 	}
 	r.rate, r.interval, r.rtype, r.cfgLoaded = rate, intervalMs, rateType, true
 	return nil
 }
+
+// UpdateRate updates an initialized limiter and resets its active window.
+// It returns false when the limiter doesn't exist.
+func (r *RRateLimiter) UpdateRate(
+	ctx context.Context, rateType RateType, rate int64, interval time.Duration,
+) (bool, error) {
+	intervalMs := interval.Milliseconds()
+	n, err := rateSetScript.Run(ctx, r.rc(), r.rateKeys(),
+		rate, intervalMs, int(rateType), 1).Int()
+	if err != nil || n == 0 {
+		return false, err
+	}
+	r.rate, r.interval, r.rtype, r.cfgLoaded = rate, intervalMs, rateType, true
+	return true, nil
+}
+
+func (r *RRateLimiter) rateKeys() []string {
+	return []string{
+		r.name,
+		r.overallValueKey(),
+		r.clientValueKey(),
+		r.overallPermitsKey(),
+		r.clientPermitsKey(),
+	}
+}
+
+var rateSetScript = redis.NewScript(`
+if ARGV[4] == '1' and redis.call('exists', KEYS[1]) == 0 then
+    return 0
+end
+local valueName = KEYS[2]
+local permitsName = KEYS[4]
+if ARGV[3] == '1' then
+    valueName = KEYS[3]
+    permitsName = KEYS[5]
+end
+local oldType = redis.call('hget', KEYS[1], 'type')
+redis.call('hset', KEYS[1], 'rate', ARGV[1],
+    'interval', ARGV[2], 'type', ARGV[3], 'keepAliveTime', 0)
+if oldType ~= false and oldType ~= ARGV[3] then
+    redis.call('del', KEYS[2], KEYS[3], KEYS[4], KEYS[5])
+else
+    redis.call('del', valueName, permitsName)
+end
+return 1
+`)
 
 // TryAcquire takes permits when the window allows it.
 func (r *RRateLimiter) TryAcquire(ctx context.Context, permits int64) (bool, error) {
@@ -161,6 +220,31 @@ func (r *RRateLimiter) TryAcquire(ctx context.Context, permits int64) (bool, err
 		return false, err
 	}
 	return n == 1, nil
+}
+
+// TryAcquireWait waits up to wait for permits to become available.
+func (r *RRateLimiter) TryAcquireWait(
+	ctx context.Context, permits int64, wait time.Duration,
+) (bool, error) {
+	if wait <= 0 {
+		return r.TryAcquire(ctx, permits)
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		ok, err := r.TryAcquire(ctx, permits)
+		if err != nil || ok {
+			return ok, err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(minDuration(remaining, 50*time.Millisecond)):
+		}
+	}
 }
 
 // Acquire blocks until permits are granted or ctx is cancelled.
@@ -232,6 +316,73 @@ func (r *RRateLimiter) AvailablePermits(ctx context.Context) (int64, error) {
 	}
 	return n, nil
 }
+
+// RateLimiterConfig is the persisted limiter configuration (Redisson
+// RateLimiterConfig).
+type RateLimiterConfig struct {
+	RateType RateType
+	Rate     int64
+	Interval time.Duration
+}
+
+// GetConfig loads the persisted config from Redis (empty when unset).
+func (r *RRateLimiter) GetConfig(ctx context.Context) (RateLimiterConfig, error) {
+	m, err := r.rc().HGetAll(ctx, r.name).Result()
+	if err != nil {
+		return RateLimiterConfig{}, err
+	}
+	if len(m) == 0 {
+		return RateLimiterConfig{}, nil
+	}
+	cfg := RateLimiterConfig{
+		Rate:     parseInt64(m["rate"]),
+		Interval: time.Duration(parseInt64(m["interval"])) * time.Millisecond,
+		RateType: RateTypeOverall,
+	}
+	if t, ok := m["type"]; ok {
+		cfg.RateType = RateType(parseInt64(t))
+	}
+	r.rate, r.interval, r.rtype, r.cfgLoaded = cfg.Rate, cfg.Interval.Milliseconds(), cfg.RateType, true
+	return cfg, nil
+}
+
+// Release returns permits to the pool immediately (capped at rate), without
+// waiting for the sliding window to expire — Redisson release(permits).
+func (r *RRateLimiter) Release(ctx context.Context, permits int64) error {
+	if permits < 0 {
+		return nil
+	}
+	if permits == 0 {
+		return nil
+	}
+	if err := r.ensureConfig(ctx); err != nil {
+		return err
+	}
+	if r.rate <= 0 {
+		return nil
+	}
+	err := rateReleaseScript.Run(ctx, r.rc(),
+		[]string{r.valueKey()}, r.rate, permits).Err()
+	if err == redis.Nil {
+		return nil
+	}
+	return err
+}
+
+var rateReleaseScript = redis.NewScript(`
+local rate = tonumber(ARGV[1])
+local current = redis.call('get', KEYS[1])
+if current == false then
+    current = rate
+else
+    current = tonumber(current)
+end
+local newValue = current + tonumber(ARGV[2])
+if newValue > rate then
+    newValue = rate
+end
+redis.call('set', KEYS[1], newValue)
+`)
 
 // Delete removes config, value and permits keys.
 func (r *RRateLimiter) Delete(ctx context.Context) error {

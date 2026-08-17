@@ -100,6 +100,11 @@ func (r *RRingBuffer) Add(ctx context.Context, value any) error {
 	return err
 }
 
+// Offer is the queue-style alias of Add.
+func (r *RRingBuffer) Offer(ctx context.Context, value any) error {
+	return r.Add(ctx, value)
+}
+
 // AddAll appends multiple elements, trimming to capacity in one pass.
 func (r *RRingBuffer) AddAll(ctx context.Context, values ...any) error {
 	if len(values) == 0 {
@@ -129,6 +134,39 @@ func (r *RRingBuffer) Size(ctx context.Context) (int64, error) {
 	return r.rc().LLen(ctx, r.name).Result()
 }
 
+// Poll removes and returns the oldest element, or (nil, nil) when empty.
+func (r *RRingBuffer) Poll(ctx context.Context) (any, error) {
+	v, err := r.rc().LPop(ctx, r.name).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r.c.codec.Decode(v)
+}
+
+// Peek returns the oldest element without removing it.
+func (r *RRingBuffer) Peek(ctx context.Context) (any, error) {
+	v, err := r.rc().LIndex(ctx, r.name, 0).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r.c.codec.Decode(v)
+}
+
+// ReadAll returns all elements from oldest to newest.
+func (r *RRingBuffer) ReadAll(ctx context.Context) ([]any, error) {
+	vals, err := r.rc().LRange(ctx, r.name, 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	return r.decodeAll(vals)
+}
+
 // ReadOldest returns up to count elements from the head (oldest first).
 func (r *RRingBuffer) ReadOldest(ctx context.Context, count int64) ([]any, error) {
 	vals, err := r.rc().LRange(ctx, r.name, 0, count-1).Result()
@@ -146,6 +184,11 @@ func (r *RRingBuffer) ReadNewest(ctx context.Context, count int64) ([]any, error
 		return nil, err
 	}
 	return r.decodeAll(vals)
+}
+
+// Clear removes queued elements while preserving the configured capacity.
+func (r *RRingBuffer) Clear(ctx context.Context) error {
+	return r.rc().Del(ctx, r.name).Err()
 }
 
 // Delete removes the buffer and its settings key.

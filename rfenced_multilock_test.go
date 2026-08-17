@@ -108,3 +108,42 @@ func TestWire_FencedLockTokenKey(t *testing.T) {
 		t.Fatalf("token value = %q, want plain decimal 1 (StringCodec)", v)
 	}
 }
+
+// TestJavaInterop_RFencedLock: shared fencing token across Go and Redisson.
+func TestJavaInterop_RFencedLock(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	name := uniqueKey(t, "jio-fenced")
+	t.Cleanup(func() { interopCleanup(t, name, "redisson_lock_token:{"+name+"}") })
+	l := client.GetFencedLock(name)
+	holder := client.HolderID("1")
+
+	tok, err := l.TryLockAndGetToken(testCtx, holder, time.Minute)
+	if err != nil || tok != 1 {
+		t.Fatalf("Go first token = %d, %v; want 1", tok, err)
+	}
+	if reply, err := javaSend("fenced_try " + name); err != nil {
+		t.Fatal(err)
+	} else if reply["token"] != nil {
+		t.Fatalf("Java acquired while Go holds: %v", reply)
+	}
+	if reply, err := javaSend("fenced_token " + name); err != nil || !numEq(reply["token"], 1) {
+		t.Fatalf("Java getToken = %v, %v; want 1", reply, err)
+	}
+	if err := l.Unlock(testCtx, holder); err != nil {
+		t.Fatal(err)
+	}
+
+	if reply, err := javaSend("fenced_try " + name); err != nil {
+		t.Fatal(err)
+	} else if !numEq(reply["token"], 2) {
+		t.Fatalf("Java token after Go release = %v; want 2", reply)
+	}
+	if tok, _ := l.TryLockAndGetToken(testCtx, holder, time.Minute); tok != 0 {
+		t.Fatalf("Go acquired while Java holds: %d", tok)
+	}
+	if cur, _ := l.GetToken(testCtx); cur != 2 {
+		t.Fatalf("Go GetToken = %d, want 2", cur)
+	}
+	mustJava(t, "fenced_release")
+}

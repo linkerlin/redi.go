@@ -14,6 +14,15 @@ type StreamEntry struct {
 	Fields map[string]any
 }
 
+// StreamNackMode controls how Redis XNACK marks delivery attempts.
+type StreamNackMode string
+
+const (
+	StreamNackSilent StreamNackMode = "SILENT"
+	StreamNackFail   StreamNackMode = "FAIL"
+	StreamNackFatal  StreamNackMode = "FATAL"
+)
+
 // RStream is a distributed log backed by a Redis Stream. Field names and
 // values are codec-encoded (matching Redisson's RStream with
 // JsonJacksonCodec — verified via redi.py's bidirectional tests); consumer
@@ -75,6 +84,19 @@ func (s *RStream) Add(ctx context.Context, fields map[string]any) (string, error
 	return s.AddWithMaxLen(ctx, fields, 0, false)
 }
 
+// AddWithID appends an entry with an explicit stream id.
+func (s *RStream) AddWithID(ctx context.Context, id string, fields map[string]any) (string, error) {
+	enc, err := s.encodeFields(fields)
+	if err != nil {
+		return "", err
+	}
+	return s.rc().XAdd(ctx, &redis.XAddArgs{
+		Stream: s.name,
+		ID:     id,
+		Values: enc,
+	}).Result()
+}
+
 // AddWithMaxLen appends with optional trimming (maxLen > 0).
 func (s *RStream) AddWithMaxLen(ctx context.Context, fields map[string]any, maxLen int64, approximate bool) (string, error) {
 	enc, err := s.encodeFields(fields)
@@ -87,6 +109,32 @@ func (s *RStream) AddWithMaxLen(ctx context.Context, fields map[string]any, maxL
 		args.Approx = approximate
 	}
 	return s.rc().XAdd(ctx, args).Result()
+}
+
+// Read returns entries newer than id using XREAD. block > 0 waits up to that
+// duration; block <= 0 returns immediately.
+func (s *RStream) Read(ctx context.Context, id string, count int64, block time.Duration) ([]StreamEntry, error) {
+	args := &redis.XReadArgs{
+		Streams: []string{s.name, id},
+		Count:   count,
+		Block:   -1,
+	}
+	if block > 0 {
+		args.Block = block
+	}
+	res, err := s.rc().XRead(ctx, args).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, sr := range res {
+		if sr.Stream == s.name {
+			return s.toEntries(sr.Messages)
+		}
+	}
+	return nil, nil
 }
 
 // ReadRange returns entries with id in [start, end] ("-" .. "+"),
@@ -162,6 +210,13 @@ func (s *RStream) CreateGroup(ctx context.Context, group, id string) (bool, erro
 	return true, nil
 }
 
+// UpdateGroupMessageID changes a group's last-delivered id (XGROUP SETID).
+func (s *RStream) UpdateGroupMessageID(
+	ctx context.Context, group, id string,
+) error {
+	return s.rc().XGroupSetID(ctx, s.name, group, id).Err()
+}
+
 // DeleteGroup removes a consumer group.
 func (s *RStream) DeleteGroup(ctx context.Context, group string) (bool, error) {
 	n, err := s.rc().XGroupDestroy(ctx, s.name, group).Result()
@@ -177,6 +232,26 @@ func (s *RStream) CreateConsumer(ctx context.Context, group, consumer string) (b
 // RemoveConsumer removes a consumer and its pending entries.
 func (s *RStream) RemoveConsumer(ctx context.Context, group, consumer string) (int64, error) {
 	return s.rc().XGroupDelConsumer(ctx, s.name, group, consumer).Result()
+}
+
+// ListGroups returns the stream's consumer-group metadata.
+func (s *RStream) ListGroups(ctx context.Context) ([]redis.XInfoGroup, error) {
+	return s.rc().XInfoGroups(ctx, s.name).Result()
+}
+
+// ListConsumers returns consumer metadata for a group.
+func (s *RStream) ListConsumers(ctx context.Context, group string) ([]redis.XInfoConsumer, error) {
+	return s.rc().XInfoConsumers(ctx, s.name, group).Result()
+}
+
+// PendingInfo returns the pending-entry summary for a group.
+func (s *RStream) PendingInfo(ctx context.Context, group string) (*redis.XPending, error) {
+	return s.rc().XPending(ctx, s.name, group).Result()
+}
+
+// GetInfo returns stream metadata from XINFO STREAM.
+func (s *RStream) GetInfo(ctx context.Context) (*redis.XInfoStream, error) {
+	return s.rc().XInfoStream(ctx, s.name).Result()
 }
 
 // ReadGroup delivers undelivered (">") entries to a group consumer.
@@ -215,6 +290,21 @@ func (s *RStream) Ack(ctx context.Context, group string, ids ...string) (int64, 
 		return 0, nil
 	}
 	return s.rc().XAck(ctx, s.name, group, ids...).Result()
+}
+
+// Nack negatively acknowledges pending entries using Redis 8.2 XNACK.
+func (s *RStream) Nack(
+	ctx context.Context, group string, mode StreamNackMode, ids ...string,
+) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, 0, 6+len(ids))
+	args = append(args, "XNACK", s.name, group, string(mode), "IDS", len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	return s.c.rc.Do(ctx, args...).Int64()
 }
 
 // PendingEntry describes an entry delivered but not yet acknowledged.
@@ -271,6 +361,22 @@ func (s *RStream) Claim(ctx context.Context, group, consumer string, minIdle tim
 	return s.toEntries(vals)
 }
 
+// FastClaim transfers ownership like Claim and returns only message ids.
+func (s *RStream) FastClaim(
+	ctx context.Context, group, consumer string, minIdle time.Duration, ids ...string,
+) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return s.rc().XClaimJustID(ctx, &redis.XClaimArgs{
+		Stream:   s.name,
+		Group:    group,
+		Consumer: consumer,
+		MinIdle:  minIdle,
+		Messages: ids,
+	}).Result()
+}
+
 // AutoClaim claims up to count entries idle for at least minIdle, starting
 // the scan at start ("0-0"). Returns the entries and the next cursor.
 func (s *RStream) AutoClaim(ctx context.Context, group, consumer string, minIdle time.Duration, start string, count int64) ([]StreamEntry, string, error) {
@@ -287,6 +393,24 @@ func (s *RStream) AutoClaim(ctx context.Context, group, consumer string, minIdle
 	}
 	entries, err := s.toEntries(vals)
 	return entries, cursor, err
+}
+
+// FastAutoClaim claims entries like AutoClaim and returns only message ids.
+func (s *RStream) FastAutoClaim(
+	ctx context.Context,
+	group, consumer string,
+	minIdle time.Duration,
+	start string,
+	count int64,
+) ([]string, string, error) {
+	return s.rc().XAutoClaimJustID(ctx, &redis.XAutoClaimArgs{
+		Stream:   s.name,
+		Group:    group,
+		Consumer: consumer,
+		MinIdle:  minIdle,
+		Start:    start,
+		Count:    count,
+	}).Result()
 }
 
 func (s *RStream) toEntries(msgs []redis.XMessage) ([]StreamEntry, error) {

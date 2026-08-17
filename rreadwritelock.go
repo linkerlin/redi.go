@@ -219,6 +219,42 @@ func (s *RReadWriteSubLock) TryLock(ctx context.Context, clientID string, ttl ti
 	return false, nil
 }
 
+// TryLockWait tries to acquire until wait elapses or ctx is cancelled.
+func (s *RReadWriteSubLock) TryLockWait(
+	ctx context.Context, clientID string, wait, ttl time.Duration,
+) (bool, error) {
+	if wait <= 0 {
+		return s.TryLock(ctx, clientID, ttl)
+	}
+	deadline := time.Now().Add(wait)
+	ok, err := s.TryLock(ctx, clientID, ttl)
+	if err != nil || ok {
+		return ok, err
+	}
+	sub := s.subscribe(ctx, s.channel)
+	defer sub.Close() //nolint:errcheck // connection teardown
+	wake := sub.Channel()
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-wake:
+		case <-time.After(minDuration(remaining, time.Second)):
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+		ok, err = s.TryLock(ctx, clientID, ttl)
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+}
+
 // Lock blocks until acquired, waking on the rwlock channel.
 func (s *RReadWriteSubLock) Lock(ctx context.Context, clientID string, ttl time.Duration) error {
 	ok, err := s.TryLock(ctx, clientID, ttl)
@@ -289,6 +325,21 @@ func (s *RReadWriteSubLock) IsLocked(ctx context.Context) (bool, error) {
 func (s *RReadWriteSubLock) IsHeldBy(ctx context.Context, clientID string) (bool, error) {
 	primary, _ := s.entries(clientID)
 	return s.rc().HExists(ctx, s.name, primary).Result()
+}
+
+// HoldCount returns the re-entrancy count held by clientID.
+func (s *RReadWriteSubLock) HoldCount(ctx context.Context, clientID string) (int64, error) {
+	primary, _ := s.entries(clientID)
+	n, err := s.rc().HGet(ctx, s.name, primary).Int64()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	return n, err
+}
+
+// RemainTimeToLive returns the remaining lease for the shared lock key.
+func (s *RReadWriteSubLock) RemainTimeToLive(ctx context.Context) (time.Duration, error) {
+	return s.rc().PTTL(ctx, s.name).Result()
 }
 
 // ForceUnlock deletes the lock key and wakes all waiters.

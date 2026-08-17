@@ -89,10 +89,12 @@ func TestRLocalCachedMap_CrossInstanceInvalidation(t *testing.T) {
 	if err := m1.Put(testCtx, "b", 2); err != nil {
 		t.Fatal(err)
 	}
-	// Populate m2 cache with both.
-	_, _ = m2.Get(testCtx, "a")
-	_, _ = m2.Get(testCtx, "b")
-	if len(m2.CachedKeys()) != 2 {
+	// Populate m2 cache with both (allow async invalidation races to settle).
+	if !eventual(t, 3*time.Second, func() bool {
+		_, _ = m2.Get(testCtx, "a")
+		_, _ = m2.Get(testCtx, "b")
+		return len(m2.CachedKeys()) == 2
+	}) {
 		t.Fatalf("m2 cache = %v", m2.CachedKeys())
 	}
 	if err := m1.Clear(testCtx); err != nil {
@@ -102,6 +104,11 @@ func TestRLocalCachedMap_CrossInstanceInvalidation(t *testing.T) {
 		return len(m2.CachedKeys()) == 0
 	}) {
 		t.Fatal("m2 local cache not cleared by m1 Clear broadcast")
+	}
+	// Clear must also DEL the Redis HASH (not only local + broadcast).
+	sz, err := m1.Size(testCtx)
+	if err != nil || sz != 0 {
+		t.Fatalf("Redis Size after Clear = %d, %v; want 0", sz, err)
 	}
 }
 

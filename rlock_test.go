@@ -68,6 +68,31 @@ func TestRLock_Reentrant(t *testing.T) {
 	}
 }
 
+func TestClient_HolderID(t *testing.T) {
+	client := newTestClient(t)
+	h := client.HolderID("7")
+	if h != client.ID()+":7" {
+		t.Fatalf("HolderID = %q, want %s:7", h, client.ID())
+	}
+	if client.HolderID("") != client.ID()+":0" {
+		t.Fatalf("empty threadID = %q", client.HolderID(""))
+	}
+
+	l := client.GetLock(uniqueKey(t, "holder"))
+	if err := l.Lock(testCtx, h, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unlock(testCtx, h) //nolint:errcheck
+	ok, err := l.IsHeldBy(testCtx, h)
+	if err != nil || !ok {
+		t.Fatalf("IsHeldBy = %v, %v", ok, err)
+	}
+	ttl, err := l.RemainTimeToLive(testCtx)
+	if err != nil || ttl < time.Second {
+		t.Fatalf("RemainTimeToLive = %v, %v", ttl, err)
+	}
+}
+
 // TestRLock_Watchdog verifies P0 fix C1: with a short watchdog lease the
 // lock is renewed indefinitely, so nobody else can acquire it.
 func TestRLock_Watchdog(t *testing.T) {

@@ -65,6 +65,38 @@ func TestRBucket_TTL(t *testing.T) {
 	}
 }
 
+func TestRBucket_SyncAPIs(t *testing.T) {
+	client := newTestClient(t)
+	b := client.GetBucket(uniqueKey(t, "bucket-sync"))
+	defer b.Delete(testCtx) //nolint:errcheck
+
+	if ok, err := b.TrySetWithTTL(testCtx, "first", 3*time.Second); err != nil || !ok {
+		t.Fatalf("TrySetWithTTL = %v, %v", ok, err)
+	}
+	if err := b.SetAndKeepTTL(testCtx, "kept"); err != nil {
+		t.Fatal("SetAndKeepTTL:", err)
+	}
+	if ttl, err := b.RemainTTL(testCtx); err != nil || ttl <= 0 {
+		t.Fatalf("RemainTTL after SetAndKeepTTL = %v, %v", ttl, err)
+	}
+	if ok, err := b.SetIfExistsWithTTL(testCtx, "second", 3*time.Second); err != nil || !ok {
+		t.Fatalf("SetIfExistsWithTTL = %v, %v", ok, err)
+	}
+	prev, err := b.GetAndSetWithTTL(testCtx, "third", 3*time.Second)
+	if err != nil || prev != "second" {
+		t.Fatalf("GetAndSetWithTTL = %v, %v", prev, err)
+	}
+	if size, err := b.Size(testCtx); err != nil || size == 0 {
+		t.Fatalf("Size = %d, %v", size, err)
+	}
+	if ok, err := b.CompareAndDelete(testCtx, "wrong"); err != nil || ok {
+		t.Fatalf("CompareAndDelete mismatch = %v, %v", ok, err)
+	}
+	if ok, err := b.CompareAndDelete(testCtx, "third"); err != nil || !ok {
+		t.Fatalf("CompareAndDelete match = %v, %v", ok, err)
+	}
+}
+
 func TestRDeque(t *testing.T) {
 	client := newTestClient(t)
 	d := client.GetDeque(uniqueKey(t, "deque"))

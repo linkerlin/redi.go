@@ -3,6 +3,8 @@ package redi_test
 import (
 	"encoding/json"
 	"testing"
+
+	redi "github.com/linkerlin/redi.go"
 )
 
 func TestRHyperLogLog(t *testing.T) {
@@ -72,6 +74,38 @@ func TestRGeo(t *testing.T) {
 	pos, _ = g.Pos(testCtx, "beijing")
 	if abs(pos[0]-116.40) > 1e-4 {
 		t.Fatal("TryAdd overwrote existing member position")
+	}
+
+	added, err := g.AddMany(testCtx, []redi.GeoLocation{
+		{Lon: 113.26, Lat: 23.13, Member: "guangzhou"},
+		{Lon: 114.06, Lat: 22.55, Member: "shenzhen"},
+	})
+	if err != nil || added != 2 {
+		t.Fatalf("AddMany = %d, %v; want 2, nil", added, err)
+	}
+	positions, err := g.PosMany(testCtx, "guangzhou", "missing", "shenzhen")
+	if err != nil || len(positions) != 3 || positions[0] == nil || positions[1] != nil || positions[2] == nil {
+		t.Fatalf("PosMany = %v, %v", positions, err)
+	}
+	hashes, err := g.HashMany(testCtx, "guangzhou", "missing", "shenzhen")
+	if err != nil || len(hashes) != 3 || hashes[0] == "" || hashes[1] != "" || hashes[2] == "" {
+		t.Fatalf("HashMany = %v, %v", hashes, err)
+	}
+
+	ok, err = g.AddIfExists(testCtx, 113.27, 23.14, "guangzhou")
+	if err != nil || !ok {
+		t.Fatalf("AddIfExists(existing) = %v, %v; want true, nil", ok, err)
+	}
+	ok, err = g.AddIfExists(testCtx, 0, 0, "missing")
+	if err != nil || ok {
+		t.Fatalf("AddIfExists(missing) = %v, %v; want false, nil", ok, err)
+	}
+
+	dest := uniqueKey(t, "geo-store")
+	defer client.GetGeo(dest).Delete(testCtx) //nolint:errcheck
+	stored, err := g.StoreSearchTo(testCtx, dest, 113.27, 23.14, 200, "km", 1)
+	if err != nil || stored != 1 {
+		t.Fatalf("StoreSearchTo = %d, %v; want 1, nil", stored, err)
 	}
 }
 

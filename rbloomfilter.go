@@ -160,6 +160,22 @@ func (f *RBloomFilter) Add(ctx context.Context, element any) (bool, error) {
 	return added, nil
 }
 
+// AddAll adds elements and returns how many set at least one previously clear
+// bit, matching Redisson's collection add count.
+func (f *RBloomFilter) AddAll(ctx context.Context, elements ...any) (int64, error) {
+	var added int64
+	for _, element := range elements {
+		ok, err := f.Add(ctx, element)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			added++
+		}
+	}
+	return added, nil
+}
+
 // Contains reports whether element may have been added (false = definitely not).
 func (f *RBloomFilter) Contains(ctx context.Context, element any) (bool, error) {
 	if err := f.ensureConfig(ctx); err != nil {
@@ -177,6 +193,21 @@ func (f *RBloomFilter) Contains(ctx context.Context, element any) (bool, error) 
 		}
 	}
 	return true, nil
+}
+
+// ContainsAll returns how many supplied elements may be present.
+func (f *RBloomFilter) ContainsAll(ctx context.Context, elements ...any) (int64, error) {
+	var contained int64
+	for _, element := range elements {
+		ok, err := f.Contains(ctx, element)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			contained++
+		}
+	}
+	return contained, nil
 }
 
 // Count estimates the number of distinct elements added.

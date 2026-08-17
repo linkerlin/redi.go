@@ -34,6 +34,36 @@ func (d *RDeque) AddLast(ctx context.Context, values ...any) error {
 	return d.rc().RPush(ctx, d.name, enc...).Err()
 }
 
+// AddFirstIfExists pushes values at the head only when the deque exists and
+// returns the resulting length.
+func (d *RDeque) AddFirstIfExists(
+	ctx context.Context, values ...any,
+) (int64, error) {
+	if len(values) == 0 {
+		return 0, nil
+	}
+	enc, err := d.encodeAll(values)
+	if err != nil {
+		return 0, err
+	}
+	return d.rc().LPushX(ctx, d.name, enc...).Result()
+}
+
+// AddLastIfExists pushes values at the tail only when the deque exists and
+// returns the resulting length.
+func (d *RDeque) AddLastIfExists(
+	ctx context.Context, values ...any,
+) (int64, error) {
+	if len(values) == 0 {
+		return 0, nil
+	}
+	enc, err := d.encodeAll(values)
+	if err != nil {
+		return 0, err
+	}
+	return d.rc().RPushX(ctx, d.name, enc...).Result()
+}
+
 // RemoveFirst pops the head element. Returns (nil, nil) when empty.
 func (d *RDeque) RemoveFirst(ctx context.Context) (any, error) {
 	v, err := d.rc().LPop(ctx, d.name).Result()
@@ -44,6 +74,19 @@ func (d *RDeque) RemoveFirst(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	return d.c.codec.Decode(v)
+}
+
+// RemoveFirstInto pops the head and decodes it into target.
+// Returns false when the deque is empty.
+func (d *RDeque) RemoveFirstInto(ctx context.Context, target any) (bool, error) {
+	v, err := d.rc().LPop(ctx, d.name).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, decodeInto(d.c.codec, v, target)
 }
 
 // RemoveLast pops the tail element. Returns (nil, nil) when empty.
@@ -58,6 +101,19 @@ func (d *RDeque) RemoveLast(ctx context.Context) (any, error) {
 	return d.c.codec.Decode(v)
 }
 
+// RemoveLastInto pops the tail and decodes it into target.
+// Returns false when the deque is empty.
+func (d *RDeque) RemoveLastInto(ctx context.Context, target any) (bool, error) {
+	v, err := d.rc().RPop(ctx, d.name).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, decodeInto(d.c.codec, v, target)
+}
+
 // PeekFirst returns the head element without removing it.
 func (d *RDeque) PeekFirst(ctx context.Context) (any, error) {
 	v, err := d.rc().LIndex(ctx, d.name, 0).Result()
@@ -68,6 +124,19 @@ func (d *RDeque) PeekFirst(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	return d.c.codec.Decode(v)
+}
+
+// PeekFirstInto decodes the head into target without removing it.
+// Returns false when the deque is empty.
+func (d *RDeque) PeekFirstInto(ctx context.Context, target any) (bool, error) {
+	v, err := d.rc().LIndex(ctx, d.name, 0).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, decodeInto(d.c.codec, v, target)
 }
 
 // PeekLast returns the tail element without removing it.
@@ -82,9 +151,39 @@ func (d *RDeque) PeekLast(ctx context.Context) (any, error) {
 	return d.c.codec.Decode(v)
 }
 
+// PeekLastInto decodes the tail into target without removing it.
+// Returns false when the deque is empty.
+func (d *RDeque) PeekLastInto(ctx context.Context, target any) (bool, error) {
+	v, err := d.rc().LIndex(ctx, d.name, -1).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, decodeInto(d.c.codec, v, target)
+}
+
 // Size returns the number of elements.
 func (d *RDeque) Size(ctx context.Context) (int64, error) {
 	return d.rc().LLen(ctx, d.name).Result()
+}
+
+// ReadAll returns all elements from head to tail without removing them.
+func (d *RDeque) ReadAll(ctx context.Context) ([]any, error) {
+	vals, err := d.rc().LRange(ctx, d.name, 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(vals))
+	for i, v := range vals {
+		decoded, err := d.c.codec.Decode(v)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = decoded
+	}
+	return out, nil
 }
 
 // Clear removes all elements.
@@ -146,6 +245,50 @@ func (q *RBlockingQueue) PollWithTimeout(ctx context.Context, timeout time.Durat
 		return nil, nil
 	}
 	return q.c.codec.Decode(res[1])
+}
+
+// PollFromAny blocks for a head element from this queue or any named queue.
+// This queue has priority when multiple queues already contain elements.
+func (q *RBlockingQueue) PollFromAny(
+	ctx context.Context, timeout time.Duration, otherNames ...string,
+) (any, error) {
+	if timeout < 0 {
+		return nil, nil
+	}
+	names := append([]string{q.name}, otherNames...)
+	secs := secondsAtLeast(timeout)
+	res, err := q.rc().BLPop(ctx, time.Duration(secs)*time.Second, names...).Result()
+	if err == redis.Nil || err == context.DeadlineExceeded {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(res) < 2 {
+		return nil, nil
+	}
+	return q.c.codec.Decode(res[1])
+}
+
+// PollLastAndOfferFirstTo atomically moves the tail element to the head of
+// dest, blocking up to timeout while this queue is empty.
+func (q *RBlockingQueue) PollLastAndOfferFirstTo(
+	ctx context.Context, dest string, timeout time.Duration,
+) (any, error) {
+	if timeout < 0 {
+		return nil, nil
+	}
+	secs := secondsAtLeast(timeout)
+	value, err := q.rc().BLMove(
+		ctx, q.name, dest, "RIGHT", "LEFT", time.Duration(secs)*time.Second,
+	).Result()
+	if err == redis.Nil || err == context.DeadlineExceeded {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return q.c.codec.Decode(value)
 }
 
 // RBlockingDeque is an RDeque with blocking consumption from both ends.

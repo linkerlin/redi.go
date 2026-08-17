@@ -12,6 +12,10 @@ import (
 // ErrLockNotHeld is returned by Unlock when the caller does not own the lock.
 var ErrLockNotHeld = errors.New("redi: lock not held")
 
+// ErrLockReentrant is returned when a non-reentrant lock's current holder
+// attempts to acquire it again.
+var ErrLockReentrant = errors.New("redi: non-reentrant lock is already held by caller")
+
 // unlockMsg is Redisson's LockPubSub.UNLOCK_MESSAGE (0).
 const unlockMsg = "0"
 
@@ -68,8 +72,9 @@ return 0
 // used to wake up waiting acquirers on release (~0ms wakeup vs 50-100ms
 // polling).
 //
-// The caller-supplied clientID is used as the HASH field directly; to
-// interoperate with Java Redisson use "uuid:threadId" shaped ids.
+// The caller-supplied clientID is used as the HASH field directly.
+// Prefer Client.HolderID(threadID) for a Redisson-shaped "uuid:threadId"
+// field that stays stable across re-entry and Unlock.
 //
 // Lock semantics (matching Redisson):
 //   - ttl <= 0: watchdog mode – lease = Config.LockWatchdogTimeout (30s
@@ -156,6 +161,65 @@ func (l *RLock) TryLock(ctx context.Context, clientID string, ttl time.Duration)
 	return false, nil
 }
 
+// TryLockWait tries to acquire until wait elapses or ctx is cancelled.
+// lease/ttl semantics match Lock (ttl<=0 enables watchdog).
+func (l *RLock) TryLockWait(ctx context.Context, clientID string, wait, ttl time.Duration) (bool, error) {
+	if wait <= 0 {
+		return l.TryLock(ctx, clientID, ttl)
+	}
+	deadline := time.Now().Add(wait)
+	lease := l.c.cfg.LockWatchdogTimeout
+	watchdog := ttl <= 0
+	if ttl > 0 {
+		lease = ttl
+	}
+	res, err := l.runAcquire(ctx, clientID, lease)
+	if err != nil {
+		return false, err
+	}
+	if res {
+		if watchdog {
+			l.startRenewer(clientID)
+		}
+		return true, nil
+	}
+	sub := l.subscribe(ctx, l.channel)
+	defer sub.Close() //nolint:errcheck
+	wake := sub.Channel()
+	for {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-wake:
+		case <-time.After(minDuration(remain, time.Second)):
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+		res, err = l.runAcquire(ctx, clientID, lease)
+		if err != nil {
+			return false, err
+		}
+		if res {
+			if watchdog {
+				l.startRenewer(clientID)
+			}
+			return true, nil
+		}
+	}
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // Unlock releases one hold. When the hold count reaches zero the key is
 // deleted and waiting acquirers are woken. The watchdog (if any) is only
 // cancelled after ownership is verified, so a stray Unlock by a non-owner
@@ -204,6 +268,13 @@ func (l *RLock) HoldCount(ctx context.Context, clientID string) (int64, error) {
 		return 0, nil
 	}
 	return n, err
+}
+
+// RemainTimeToLive returns the remaining lease. Negative durations follow
+// go-redis PTTL conventions (approximately -2ns when the key is absent,
+// -1ns when present without expiry).
+func (l *RLock) RemainTimeToLive(ctx context.Context) (time.Duration, error) {
+	return l.rc().PTTL(ctx, l.name).Result()
 }
 
 // runAcquire returns acquired=true when the script returned nil

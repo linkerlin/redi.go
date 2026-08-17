@@ -1,6 +1,8 @@
 package redi_test
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -57,6 +59,42 @@ func TestJavaInterop_RReadWriteLock(t *testing.T) {
 		t.Fatal("Go write lock acquired while two readers hold the lock")
 	}
 	_ = rw.ReadLock().Unlock(testCtx, "go:1")
+}
+
+func TestJavaInterop_RFairLock(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	name := uniqueKey(t, "jio-fair")
+	queueKey := "redisson_lock_queue:{" + name + "}"
+	timeoutKey := "redisson_lock_timeout:{" + name + "}"
+	t.Cleanup(func() {
+		_, _ = javaSend("fair_unlock")
+		interopCleanup(t, name, queueKey, timeoutKey)
+	})
+	lock := client.GetFairLock(name)
+
+	if err := lock.Lock(testCtx, "go:fair", time.Minute); err != nil {
+		t.Fatal("Go fair Lock:", err)
+	}
+	if reply, err := javaSend("fair_try " + name); err != nil || reply["acquired"] != false {
+		t.Fatalf("java fair_try while Go holds = %v, %v", reply, err)
+	}
+	if err := lock.Unlock(testCtx, "go:fair"); err != nil {
+		t.Fatal("Go fair Unlock:", err)
+	}
+
+	if reply, err := javaSend("fair_hold " + name); err != nil || reply["acquired"] != true {
+		t.Fatalf("java fair_hold = %v, %v", reply, err)
+	}
+	if reply, err := javaSend("fair_held " + name); err != nil || reply["held"] != true {
+		t.Fatalf("java fair_held = %v, %v", reply, err)
+	}
+	if acquired, err := lock.TryLock(testCtx, "go:fair", time.Minute); err != nil || acquired {
+		t.Fatalf("Go TryLock while Java holds = %v, %v", acquired, err)
+	}
+	if reply, err := javaSend("fair_unlock"); err != nil || reply["ok"] != true {
+		t.Fatalf("java fair_unlock = %v, %v", reply, err)
+	}
 }
 
 func TestJavaInterop_RList(t *testing.T) {
@@ -171,6 +209,50 @@ func TestJavaInterop_RBucket(t *testing.T) {
 		if !ok || obj["k"] != "v" {
 			t.Fatalf("java get of Go map = %#v", reply["value"])
 		}
+	}
+}
+
+func TestJavaInterop_RBinaryStream(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	name := uniqueKey(t, "jio-binary")
+	t.Cleanup(func() { interopCleanup(t, name) })
+	stream := client.GetBinaryStream(name)
+
+	fromJava := []byte{0x00, 0xff, 'J', 'a', 'v', 'a'}
+	if reply, err := javaSend("binary_set " + name + " " +
+		base64.StdEncoding.EncodeToString(fromJava)); err != nil || !numEq(reply["size"], int64(len(fromJava))) {
+		t.Fatalf("java binary_set = %v, %v", reply, err)
+	}
+	got, err := stream.Get(testCtx)
+	if err != nil || !bytes.Equal(got, fromJava) {
+		t.Fatalf("Go Get after Java set = %v, %v; want %v", got, err, fromJava)
+	}
+
+	fromGo := []byte{'G', 'o', 0x00, 0xfe}
+	if err := stream.Set(testCtx, fromGo); err != nil {
+		t.Fatal("Go Set:", err)
+	}
+	reply, err := javaSend("binary_get " + name)
+	if err != nil {
+		t.Fatal("java binary_get:", err)
+	}
+	encoded, _ := reply["value"].(string)
+	javaRead, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || !bytes.Equal(javaRead, fromGo) {
+		t.Fatalf("Java Get after Go set = %v, %v; want %v", javaRead, err, fromGo)
+	}
+
+	patch := []byte{0xaa, 0xbb}
+	reply, err = javaSend("binary_channel_write " + name + " 1 " +
+		base64.StdEncoding.EncodeToString(patch))
+	if err != nil || !numEq(reply["written"], int64(len(patch))) {
+		t.Fatalf("java binary_channel_write = %v, %v", reply, err)
+	}
+	got, err = stream.Get(testCtx)
+	want := []byte{'G', 0xaa, 0xbb, 0xfe}
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("Go Get after Java channel write = %v, %v; want %v", got, err, want)
 	}
 }
 

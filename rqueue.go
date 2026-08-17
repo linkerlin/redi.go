@@ -40,6 +40,19 @@ func (q *RQueue) Poll(ctx context.Context) (any, error) {
 	return q.c.codec.Decode(v)
 }
 
+// PollInto removes the head and decodes it into target.
+// Returns false when the queue is empty.
+func (q *RQueue) PollInto(ctx context.Context, target any) (bool, error) {
+	v, err := q.rc().LPop(ctx, q.name).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, decodeInto(q.c.codec, v, target)
+}
+
 // Peek returns the head element without removing it.
 // Returns (nil, nil) when the queue is empty.
 func (q *RQueue) Peek(ctx context.Context) (any, error) {
@@ -51,6 +64,19 @@ func (q *RQueue) Peek(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	return q.c.codec.Decode(v)
+}
+
+// PeekInto decodes the head into target without removing it.
+// Returns false when the queue is empty.
+func (q *RQueue) PeekInto(ctx context.Context, target any) (bool, error) {
+	v, err := q.rc().LIndex(ctx, q.name, 0).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, decodeInto(q.c.codec, v, target)
 }
 
 // Take blocks until an element is available or ctx is cancelled, then
@@ -77,6 +103,23 @@ func (q *RQueue) Take(ctx context.Context, timeout time.Duration) (any, error) {
 // Size returns the number of elements in the queue.
 func (q *RQueue) Size(ctx context.Context) (int64, error) {
 	return q.rc().LLen(ctx, q.name).Result()
+}
+
+// ReadAll returns all elements without removing them (LRANGE 0 -1).
+func (q *RQueue) ReadAll(ctx context.Context) ([]any, error) {
+	vals, err := q.rc().LRange(ctx, q.name, 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(vals))
+	for i, v := range vals {
+		d, err := q.c.codec.Decode(v)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = d
+	}
+	return out, nil
 }
 
 // Clear removes all elements.

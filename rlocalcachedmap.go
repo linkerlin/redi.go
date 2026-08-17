@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -123,6 +124,19 @@ func (m *RLocalCachedMap) Get(ctx context.Context, field string) (any, error) {
 	return val, nil
 }
 
+// GetInto decodes the value into target, serving from the local cache on hit.
+func (m *RLocalCachedMap) GetInto(ctx context.Context, field string, target any) (bool, error) {
+	v, err := m.Get(ctx, field)
+	if err != nil || v == nil {
+		return false, err
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return false, err
+	}
+	return true, json.Unmarshal(b, target)
+}
+
 // Put writes through to Redis, updates the local cache and broadcasts
 // invalidation to the other Go instances.
 func (m *RLocalCachedMap) Put(ctx context.Context, field string, value any) error {
@@ -132,6 +146,20 @@ func (m *RLocalCachedMap) Put(ctx context.Context, field string, value any) erro
 	}
 	m.storeLocal(ek, value)
 	m.broadcast(ctx, ek)
+	return nil
+}
+
+// PutAll write-throughs every entry, updates the local cache, and broadcasts
+// one invalidation per field (same granularity as Put).
+func (m *RLocalCachedMap) PutAll(ctx context.Context, entries map[string]any) error {
+	if err := m.RMap.PutAll(ctx, entries); err != nil {
+		return err
+	}
+	for field, value := range entries {
+		ek := encodeKey(m.c.codec, field)
+		m.storeLocal(ek, value)
+		m.broadcast(ctx, ek)
+	}
 	return nil
 }
 
@@ -146,6 +174,77 @@ func (m *RLocalCachedMap) PutIfAbsent(ctx context.Context, field string, value a
 	m.storeLocal(ek, value)
 	m.broadcast(ctx, ek)
 	return true, nil
+}
+
+// FastPut write-throughs like Put and returns whether the field was new.
+func (m *RLocalCachedMap) FastPut(ctx context.Context, field string, value any) (bool, error) {
+	ok, err := m.RMap.FastPut(ctx, field, value)
+	if err != nil {
+		return false, err
+	}
+	ek := encodeKey(m.c.codec, field)
+	m.storeLocal(ek, value)
+	m.broadcast(ctx, ek)
+	return ok, nil
+}
+
+// Replace write-throughs when the field exists; updates local cache and
+// broadcasts on success.
+func (m *RLocalCachedMap) Replace(ctx context.Context, field string, value any) (any, error) {
+	prev, err := m.RMap.Replace(ctx, field, value)
+	if err != nil || prev == nil {
+		return prev, err
+	}
+	ek := encodeKey(m.c.codec, field)
+	m.storeLocal(ek, value)
+	m.broadcast(ctx, ek)
+	return prev, nil
+}
+
+// ReplaceIf write-throughs on compare-and-set success.
+func (m *RLocalCachedMap) ReplaceIf(ctx context.Context, field string, oldValue, newValue any) (bool, error) {
+	ok, err := m.RMap.ReplaceIf(ctx, field, oldValue, newValue)
+	if err != nil || !ok {
+		return ok, err
+	}
+	ek := encodeKey(m.c.codec, field)
+	m.storeLocal(ek, newValue)
+	m.broadcast(ctx, ek)
+	return true, nil
+}
+
+// FastPutIfExists write-throughs when the field already exists.
+func (m *RLocalCachedMap) FastPutIfExists(ctx context.Context, field string, value any) (bool, error) {
+	ok, err := m.RMap.FastPutIfExists(ctx, field, value)
+	if err != nil || !ok {
+		return ok, err
+	}
+	ek := encodeKey(m.c.codec, field)
+	m.storeLocal(ek, value)
+	m.broadcast(ctx, ek)
+	return true, nil
+}
+
+// FastReplace is an alias of FastPutIfExists with local-cache update.
+func (m *RLocalCachedMap) FastReplace(ctx context.Context, field string, value any) (bool, error) {
+	return m.FastPutIfExists(ctx, field, value)
+}
+
+// FastRemove deletes fields, drops them from the local cache, and broadcasts.
+func (m *RLocalCachedMap) FastRemove(ctx context.Context, fields ...string) (int64, error) {
+	n, err := m.RMap.FastRemove(ctx, fields...)
+	if err != nil {
+		return n, err
+	}
+	m.mu.Lock()
+	for _, f := range fields {
+		delete(m.cache, encodeKey(m.c.codec, f))
+	}
+	m.mu.Unlock()
+	for _, f := range fields {
+		m.broadcast(ctx, encodeKey(m.c.codec, f))
+	}
+	return n, nil
 }
 
 // Remove deletes the field everywhere and broadcasts.
@@ -190,6 +289,47 @@ func (m *RLocalCachedMap) ClearLocalCache() {
 	m.mu.Lock()
 	m.cache = make(map[string]any)
 	m.mu.Unlock()
+}
+
+// PreloadCache warms the local cache with all current Redis entries.
+// The optional count is accepted as the Redisson scan-batch hint.
+func (m *RLocalCachedMap) PreloadCache(ctx context.Context, count ...int) error {
+	entries, err := m.GetAll(ctx)
+	if err != nil {
+		return err
+	}
+	for key, value := range entries {
+		m.storeLocal(encodeKey(m.c.codec, key), value)
+	}
+	return nil
+}
+
+// CachedValues returns a snapshot of values currently held locally.
+func (m *RLocalCachedMap) CachedValues() []any {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]any, 0, len(m.cache))
+	for _, value := range m.cache {
+		out = append(out, value)
+	}
+	return out
+}
+
+// GetCachedMap returns a decoded snapshot of the local cache.
+func (m *RLocalCachedMap) GetCachedMap() map[string]any {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]any, len(m.cache))
+	for encodedKey, value := range m.cache {
+		key, err := m.c.codec.Decode(encodedKey)
+		if err != nil {
+			continue
+		}
+		if field, ok := key.(string); ok {
+			out[field] = value
+		}
+	}
+	return out
 }
 
 // SetLocalCacheLimit configures local eviction: entries older than ttl are

@@ -24,10 +24,11 @@ func ExampleNewClient() {
 
 	// A distributed lock: ttl<=0 enables the watchdog auto-renewal.
 	lock := client.GetLock("demo:lock")
-	if err := lock.Lock(ctx, "worker-1:1", 0); err != nil {
+	holder := client.HolderID("1")
+	if err := lock.Lock(ctx, holder, 0); err != nil {
 		log.Fatal(err)
 	}
-	defer lock.Unlock(ctx, "worker-1:1") //nolint:errcheck // example
+	defer lock.Unlock(ctx, holder) //nolint:errcheck // example
 
 	// A distributed map (Redisson wire-compatible values).
 	_, _ = client.GetKeys().Delete(ctx, "demo:map")
@@ -140,4 +141,50 @@ func ExampleRBatch() {
 	fmt.Println("batched size:", sz)
 	_ = client.GetMap("demo:batch").Clear(ctx)
 	// Output: batched size: 100
+}
+
+func ExampleRBucket_GetInto() {
+	client, err := redi.NewClient(redi.DefaultConfig())
+	if err != nil {
+		fmt.Println("skip:", err)
+		return
+	}
+	defer client.Close() //nolint:errcheck // example
+	ctx := context.Background()
+	_, _ = client.GetKeys().Delete(ctx, "demo:bucket")
+
+	type cfg struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
+	b := client.GetBucket("demo:bucket")
+	_ = b.Set(ctx, cfg{Host: "redis", Port: 6379})
+
+	var out cfg
+	ok, _ := b.GetInto(ctx, &out)
+	fmt.Println(ok, out.Host, out.Port)
+	// Output: true redis 6379
+}
+
+func ExampleRMap_GetInto() {
+	client, err := redi.NewClient(redi.DefaultConfig())
+	if err != nil {
+		fmt.Println("skip:", err)
+		return
+	}
+	defer client.Close() //nolint:errcheck // example
+	ctx := context.Background()
+	_, _ = client.GetKeys().Delete(ctx, "demo:into-map")
+
+	type user struct {
+		Name string `json:"name"`
+	}
+	m := client.GetMap("demo:into-map")
+	_ = m.Put(ctx, "u1", user{Name: "ada"})
+
+	var u user
+	ok, _ := m.GetInto(ctx, "u1", &u)
+	fmt.Println(ok, u.Name)
+	_ = m.Clear(ctx)
+	// Output: true ada
 }

@@ -50,6 +50,46 @@ func TestRStream_Basics(t *testing.T) {
 	}
 }
 
+func TestRStream_SyncAPIs(t *testing.T) {
+	client := newTestClient(t)
+	s := client.GetStream(uniqueKey(t, "stream-sync"))
+	defer s.Delete(testCtx) //nolint:errcheck
+
+	id, err := s.AddWithID(testCtx, "1-0", map[string]any{"event": "explicit"})
+	if err != nil || id != "1-0" {
+		t.Fatalf("AddWithID = %q, %v", id, err)
+	}
+	entries, err := s.Read(testCtx, "0-0", 10, 0)
+	if err != nil || len(entries) != 1 || entries[0].Fields["event"] != "explicit" {
+		t.Fatalf("Read = %+v, %v", entries, err)
+	}
+	if created, err := s.CreateGroup(testCtx, "g", "0"); err != nil || !created {
+		t.Fatalf("CreateGroup = %v, %v", created, err)
+	}
+	if created, err := s.CreateConsumer(testCtx, "g", "c"); err != nil || !created {
+		t.Fatalf("CreateConsumer = %v, %v", created, err)
+	}
+	groups, err := s.ListGroups(testCtx)
+	if err != nil || len(groups) != 1 || groups[0].Name != "g" {
+		t.Fatalf("ListGroups = %+v, %v", groups, err)
+	}
+	consumers, err := s.ListConsumers(testCtx, "g")
+	if err != nil || len(consumers) != 1 || consumers[0].Name != "c" {
+		t.Fatalf("ListConsumers = %+v, %v", consumers, err)
+	}
+	if delivered, err := s.ReadGroup(testCtx, "g", "c", 1, 0); err != nil || len(delivered) != 1 {
+		t.Fatalf("ReadGroup = %+v, %v", delivered, err)
+	}
+	pending, err := s.PendingInfo(testCtx, "g")
+	if err != nil || pending.Count != 1 {
+		t.Fatalf("PendingInfo = %+v, %v", pending, err)
+	}
+	info, err := s.GetInfo(testCtx)
+	if err != nil || info.Length != 1 || info.LastGeneratedID != "1-0" {
+		t.Fatalf("GetInfo = %+v, %v", info, err)
+	}
+}
+
 func TestRStream_ConsumerGroup(t *testing.T) {
 	client := newTestClient(t)
 	s := client.GetStream(uniqueKey(t, "stream-group"))

@@ -2,6 +2,10 @@ package redi
 
 import (
 	"context"
+	"strconv"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // RKeys provides keyspace management (SCAN iteration, pattern deletion,
@@ -39,6 +43,67 @@ func (k *RKeys) Copy(ctx context.Context, key, newKey string, replace bool) (boo
 // Type returns the type of a key ("none" when missing).
 func (k *RKeys) Type(ctx context.Context, key string) (string, error) {
 	return k.c.rc.Type(ctx, key).Result()
+}
+
+// Expire sets a TTL on a key.
+func (k *RKeys) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	return k.c.rc.Expire(ctx, key, ttl).Result()
+}
+
+// ExpireAt sets an absolute expiry time on a key.
+func (k *RKeys) ExpireAt(ctx context.Context, key string, at time.Time) (bool, error) {
+	return k.c.rc.ExpireAt(ctx, key, at).Result()
+}
+
+// ClearExpire removes a key's TTL.
+func (k *RKeys) ClearExpire(ctx context.Context, key string) (bool, error) {
+	return k.c.rc.Persist(ctx, key).Result()
+}
+
+// RemainTTL returns the remaining TTL with millisecond precision
+// (-1 no expiry, -2 missing).
+func (k *RKeys) RemainTTL(ctx context.Context, key string) (time.Duration, error) {
+	return k.c.rc.PTTL(ctx, key).Result()
+}
+
+// Rename renames a key.
+func (k *RKeys) Rename(ctx context.Context, key, newKey string) error {
+	return k.c.rc.Rename(ctx, key, newKey).Err()
+}
+
+// RenameNX renames a key only when newKey does not exist.
+func (k *RKeys) RenameNX(ctx context.Context, key, newKey string) (bool, error) {
+	return k.c.rc.RenameNX(ctx, key, newKey).Result()
+}
+
+// Touch updates the last-access time of keys.
+func (k *RKeys) Touch(ctx context.Context, keys ...string) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	return k.c.rc.Touch(ctx, keys...).Result()
+}
+
+// Move moves a key to another Redis database.
+func (k *RKeys) Move(ctx context.Context, key string, db int) (bool, error) {
+	return k.c.rc.Move(ctx, key, db).Result()
+}
+
+// Migrate atomically moves key to another Redis instance.
+func (k *RKeys) Migrate(
+	ctx context.Context,
+	key, host string,
+	port, db int,
+	timeout time.Duration,
+) error {
+	return k.c.rc.Migrate(
+		ctx, host, strconv.Itoa(port), key, db, timeout,
+	).Err()
+}
+
+// SwapDB swaps two databases on the connected Redis server.
+func (k *RKeys) SwapDB(ctx context.Context, db1, db2 int) error {
+	return k.c.rc.Do(ctx, "SWAPDB", db1, db2).Err()
 }
 
 // Delete removes keys, returning the count removed.
@@ -136,4 +201,14 @@ func (k *RKeys) deletePattern(ctx context.Context, pattern string, unlink bool) 
 // FlushDB empties the current database.
 func (k *RKeys) FlushDB(ctx context.Context) error {
 	return k.c.rc.FlushDB(ctx).Err()
+}
+
+// FlushAll empties every database. In cluster mode it runs on every master.
+func (k *RKeys) FlushAll(ctx context.Context) error {
+	if cluster, ok := k.c.rc.(*redis.ClusterClient); ok {
+		return cluster.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
+			return master.FlushAll(ctx).Err()
+		})
+	}
+	return k.c.rc.FlushAll(ctx).Err()
 }

@@ -106,6 +106,42 @@ end
 return nil;
 `)
 
+var delayContainsScript = redis.NewScript(`
+local s = redis.call('llen', KEYS[1]);
+for i = 0, s-1, 1 do
+    local v = redis.call('lindex', KEYS[1], i);
+    local randomId, value = struct.unpack('Bc0Lc0', v);
+    if ARGV[1] == value then
+        return 1;
+    end;
+end;
+return 0;
+`)
+
+var delayRemoveScript = redis.NewScript(`
+local s = redis.call('llen', KEYS[1]);
+for i = 0, s-1, 1 do
+    local v = redis.call('lindex', KEYS[1], i);
+    local randomId, value = struct.unpack('Bc0Lc0', v);
+    if ARGV[1] == value then
+        redis.call('zrem', KEYS[2], v);
+        redis.call('lrem', KEYS[1], 1, v);
+        return 1;
+    end;
+end;
+return 0;
+`)
+
+var delayReadAllScript = redis.NewScript(`
+local result = {};
+local items = redis.call('lrange', KEYS[1], 0, -1);
+for i, v in ipairs(items) do
+    local randomId, value = struct.unpack('Bc0Lc0', v);
+    table.insert(result, value);
+end;
+return result;
+`)
+
 // Offer adds element with the given delay.
 func (q *RDelayedQueue) Offer(ctx context.Context, element any, delay time.Duration) error {
 	enc, err := q.c.codec.Encode(element)
@@ -185,6 +221,50 @@ func (q *RDelayedQueue) Peek(ctx context.Context) (any, error) {
 	return q.c.codec.Decode(v)
 }
 
+// Contains reports whether a pending delayed element equals element.
+func (q *RDelayedQueue) Contains(ctx context.Context, element any) (bool, error) {
+	encoded, err := q.c.codec.Encode(element)
+	if err != nil {
+		return false, err
+	}
+	n, err := delayContainsScript.Run(ctx, q.rc(), []string{q.queueName}, encoded).Int()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// Remove deletes one matching pending delayed element from both indexes.
+func (q *RDelayedQueue) Remove(ctx context.Context, element any) (bool, error) {
+	encoded, err := q.c.codec.Encode(element)
+	if err != nil {
+		return false, err
+	}
+	n, err := delayRemoveScript.Run(ctx, q.rc(),
+		[]string{q.queueName, q.timeoutSetKey}, encoded).Int()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// ReadAll returns all pending delayed elements in insertion order.
+func (q *RDelayedQueue) ReadAll(ctx context.Context) ([]any, error) {
+	values, err := delayReadAllScript.Run(ctx, q.rc(), []string{q.queueName}).StringSlice()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(values))
+	for i, value := range values {
+		decoded, err := q.c.codec.Decode(value)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = decoded
+	}
+	return out, nil
+}
+
 // Size returns ready + delayed counts.
 func (q *RDelayedQueue) Size(ctx context.Context) (int64, error) {
 	ready, err := q.rc().LLen(ctx, q.name).Result()
@@ -206,6 +286,11 @@ func (q *RDelayedQueue) ReadySize(ctx context.Context) (int64, error) {
 // DelayedSize returns the number of elements still waiting.
 func (q *RDelayedQueue) DelayedSize(ctx context.Context) (int64, error) {
 	return q.rc().ZCard(ctx, q.timeoutSetKey).Result()
+}
+
+// Clear removes pending delayed elements without clearing the target queue.
+func (q *RDelayedQueue) Clear(ctx context.Context) error {
+	return q.rc().Del(ctx, q.queueName, q.timeoutSetKey).Err()
 }
 
 // Delete removes the target queue and both internal keys.

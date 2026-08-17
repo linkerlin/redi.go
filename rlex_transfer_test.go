@@ -51,6 +51,37 @@ func TestRLexSortedSet(t *testing.T) {
 		t.Fatalf("RangeByLex offset/count = %v", ranged)
 	}
 
+	rank, _ := s.Rank(testCtx, "banana")
+	revRank, _ := s.RevRank(testCtx, "banana")
+	if rank != 1 || revRank != 1 {
+		t.Fatalf("rank/revRank = %d/%d; want 1/1", rank, revRank)
+	}
+	if missing, _ := s.Rank(testCtx, "missing"); missing != -1 {
+		t.Fatalf("Rank(missing) = %d; want -1", missing)
+	}
+	reversed, _ := s.RangeReversed(testCtx, 0, -1)
+	if len(reversed) != 3 || reversed[0] != "cherry" || reversed[2] != "apple" {
+		t.Fatalf("RangeReversed = %v", reversed)
+	}
+	reversed, _ = s.RangeByLexReversed(testCtx, "apple", "cherry", 1, 1)
+	if len(reversed) != 1 || reversed[0] != "banana" {
+		t.Fatalf("RangeByLexReversed offset/count = %v", reversed)
+	}
+	headReversed, _ := s.RangeHeadReversed(testCtx, "cherry", 0, -1)
+	if len(headReversed) != 2 || headReversed[0] != "banana" {
+		t.Fatalf("RangeHeadReversed = %v", headReversed)
+	}
+	tailReversed, _ := s.RangeTailReversed(testCtx, "apple", 0, -1)
+	if len(tailReversed) != 2 || tailReversed[0] != "cherry" {
+		t.Fatalf("RangeTailReversed = %v", tailReversed)
+	}
+	if random, err := s.Random(testCtx); err != nil || random == "" {
+		t.Fatalf("Random = %q, %v", random, err)
+	}
+	if random, err := s.RandomN(testCtx, 2); err != nil || len(random) != 2 {
+		t.Fatalf("RandomN = %v, %v", random, err)
+	}
+
 	// Removal.
 	n, _ = s.RemoveRangeHead(testCtx, "cherry")
 	if n != 2 {

@@ -9,6 +9,10 @@ import (
 
 // RTransferQueue atomically moves elements from its head to the tail of a
 // destination queue (single Lua round-trip, no TOCTOU window).
+//
+// Compatibility note: this is NOT Redisson's RTransferQueue (which is built
+// on RRemoteService handoff). It is a local Redis queue-to-queue migrate
+// helper. Do not expect Java getTransferQueue() to share protocol with it.
 type RTransferQueue struct {
 	*RQueue
 }

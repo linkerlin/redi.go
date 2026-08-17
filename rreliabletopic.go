@@ -123,6 +123,26 @@ func (t *RReliableTopic) Unsubscribe(id string) {
 	_ = t.rc().ZRem(ctx, t.timeoutKey, id).Err()
 }
 
+// CountListeners returns the number of local reliable listeners.
+func (t *RReliableTopic) CountListeners() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.listeners)
+}
+
+// RemoveAllListeners unregisters every local listener and subscriber group.
+func (t *RReliableTopic) RemoveAllListeners() {
+	t.mu.Lock()
+	ids := make([]string, 0, len(t.listeners))
+	for id := range t.listeners {
+		ids = append(ids, id)
+	}
+	t.mu.Unlock()
+	for _, id := range ids {
+		t.Unsubscribe(id)
+	}
+}
+
 func isBusyGroup(err error) bool {
 	return err != nil && (err.Error() == "BUSYGROUP Consumer Group name already exists" ||
 		contains(err.Error(), "BUSYGROUP"))

@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- **RArray**：Redis 8.8+ ARRAY（ARSET/ARGET/ARMGET/ARINSERT/…），`Client.GetArray`；命令缺失时测试 skip
+- **Priority* ZSET 包装**：`GetPriorityBlockingQueue` / `GetPriorityBlockingDeque` / `GetPriorityDeque`（BZPOPMIN/MAX）；COMPATIBILITY 明确非 Java Comparator
+- **RClientSideCaching 继续**：`GetClientSideCachingWithOptions` 创建独立 RESP3 CLIENT TRACKING 客户端（Destroy 关闭）；扩展 MaxMemoryBytes/DrainInterval/MaxStaleness；跨连接写后读失效回归
+- **RClientSideCaching PARTIAL**：`Config.ClientSideCaching` 接线 go-redis RESP3 CSC（standalone DB0）；`GetClientSideCaching()` 工厂转发门面
+- **不做清单收紧**：PRO-only 开源不可复刻；RTransaction / LCM 二进制失效 / reactive / Executor·Remote / LiveObject / RSortedSet 保持 REFUSE_AS_FAKE
+- **文档**：新增英文版 [README_EN.md](README_EN.md)，中英文 README 顶部互链
+- **Native / 概率结构**：`RMapCacheNative`（HPEXPIRE）、`RSet/ListMultimapCacheNative`、`RBloomFilterNative` / `RCuckooFilter` / `RTopK` / `RTDigest` / `RGcra`；命令缺失时测试 skip
+- **RBinaryStream**：原始字节流（APPEND/GETRANGE/SETRANGE + channel），Java 4.6.1 双向实测
+- **Redisson 4.6.1 API 补齐**：扩展 MultimapCache、ScoredSortedSet、Stream、Map/Set 键同步器、TimeSeries 及常用原子/集合/键空间方法，并补齐 companion TTL 与条件更新语义
+- **同步 API 补齐**：补充集合/MapCache/Stream/锁/许可/限流/Topic/Buckets 等常用条件、批量与状态查询操作
+- **锁族补齐**：新增 RFairLock（LIST+ZSET FIFO、holder 专属唤醒、watchdog）、RSpinLock、RNonReentrantLock 与 RNonReentrantFairLock；新增 RRedLock 严格多数派编排；RLock 增加限时等待与剩余 TTL，`Client.HolderID` 生成 Redisson 形 holder；FairLock 新增 Java 4.6.1 双向互斥验证
+- **Map 修复与扩面**：修复 `RMap.Clear` 无参误走字段删除的空操作；RMap/LocalCachedMap 增加 `PutAll`、Fast/Replace/Keys/Values 表面，LocalCachedMap 全部写路径继续写穿并广播失效
+- **RMapCache packed/容量补齐**：补齐 map-cache struct 打包、companion 清理与 entry 到期策略；新增 `SetMaxSize` / `TrySetMaxSize` 及 LRU/LFU 淘汰，对齐 options HASH 和 last-access ZSET
+- **类型化读取**：`GetInto` 铺到 Bucket/Map/MapCache/List/Queue/Deque/LocalCachedMap；统一先经 Codec 剥离 Java 类型包装再绑定目标
+- **List/Queue/Deque**：新增 RBoundedBlockingQueue（`redisson_bqs` 容量 companion、阻塞 Offer/Take、Poll 释放并唤醒）；List 增加 counted、索引查找、LINSERT、Trim、按索引删除与 FastSet；Queue/Deque/RingBuffer 增加常用表面
+- **Set/SetCache**：RSet 增加 counted、ReadAll、随机/弹出/Move，以及 Union/Diff/Intersection 与 Store 变体；RSetCache 增加 ReadAll、随机、ContainsAll/RemoveAll/RetainAll，并保持 TTL/maxIdle companion 一致
+- **Sorted/Geo/Delayed**：ScoredSortedSet 增加反向 range、首尾操作及 Intersection/Union/Diff（含 Store）；LexSortedSet 增加 rank、随机及反向范围；Geo 扩展批量与 Store；DelayedQueue 按 `Bc0Lc0` 原版 Lua 扩面
+- **Atomic/Bucket/Bit/Bloom**：AtomicLong/Double 增加 GetAnd*；Bucket 增加 keep-TTL、带 TTL 条件写、Size/CompareAndDelete；BitSet 增加范围/批量/BitField；BloomFilter 增加 AddAll/ContainsAll
+- **RBinaryStream**：新增不经过 Codec 的原始字节流，提供 Set/Get、范围读写、追加、顺序输入输出流与可 seek/truncate 通道；对齐 Redisson 4.6.1 的 STRING/APPEND/GETRANGE/SETRANGE wire
+- **协调原语**：Semaphore 增加限时 TryAcquire；PermitExpirableSemaphore 增加批量/限时获取与 ReleaseAll；RateLimiter 增加配置读取和许可归还
+- **Stream/TimeSeries**：Stream 增加显式 ID、普通阻塞读、group/consumer/pending/info 查询；TimeSeries 增加首尾 entry/timestamp、批量首尾、PollFirst/PollLast 与反向范围
+- **Multimap**：新增 RSetMultimapCache/RListMultimapCache per-key TTL 核心子集（惰性淘汰）；Set/List Multimap 增加 PutAll、ReplaceValues/FastReplaceValues、ContainsValue、全量 key/value、KeySize/IsEmpty，并保留各自集合顺序语义
+- **Map/Set/Multimap 键级同步器**：补齐 `GetLock` / `GetFairLock` / `GetReadWriteLock` / `GetSemaphore`，名称使用 Java `Hash.hash128toBase64(codec(key))` 与 hash-tag
+- **兼容性诚实标注**：明确 RPriorityQueue（ZSET+score）和 RTransferQueue（队列迁移）不是 Java 同名结构协议，不再暗示可与 Redisson 同名 API 互操作
+- **契约与 Cluster**：wire 契约 17 → 24 组；`prefixName`/`suffixName` companion 与裸名 CRC16 同槽；增加可选 `REDIS_CLUSTER_ADDRS` cluster 冒烟
+- **Java 互操作计数校准**：当前实际为 24 个 `TestJavaInterop_*` 测试函数（含复合场景）；新增 RFencedLock 共享 token/互斥、RFairLock 双向获取/释放与 RBinaryStream 原始字节双向验证；CI 增加 Temurin 25 + Maven + Redis 8 的 `java-interop` job
+- **工程与文档**：新增 CONTRIBUTING、GetInto godoc 示例；README/COMPATIBILITY/演进方案同步，dashboard 空状态移除过时 `redi:lock:*` 文案
+
 ## v0.2.12 (2026-08-15)
 
 - **RRingBuffer**：定容环形缓冲（源码复刻）—— `redisson_rb:{name}` 容量 SETNX + RPUSH/LPOP 溢出淘汰（批量 LTRIM、SetCapacity 即时裁剪，Lua 同 Java 原版）、ReadOldest/ReadNewest/RemainingCapacity

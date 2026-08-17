@@ -5,17 +5,10 @@ import (
 	"strings"
 )
 
-// decodeInto decodes a codec-encoded string into a typed target using the
-// JSON representation (works for any Codec whose encoding is JSON).
+// decodeInto decodes a codec-encoded Redis string into a typed pointer
+// target. It always goes through Codec.Decode first so Java type wrappers
+// (@class / ArrayList / Long) are stripped before binding — matching Get().
 func decodeInto(c Codec, s string, target any) error {
-	if _, ok := c.(JSONCodec); ok {
-		dec := json.NewDecoder(strings.NewReader(s))
-		dec.UseNumber()
-		if err := dec.Decode(target); err != nil {
-			return err
-		}
-		return nil
-	}
 	v, err := c.Decode(s)
 	if err != nil {
 		return err
@@ -24,5 +17,7 @@ func decodeInto(c Codec, s string, target any) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(b, target)
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.UseNumber()
+	return dec.Decode(target)
 }

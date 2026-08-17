@@ -32,3 +32,32 @@ jobs:
           args: --timeout 300s
       - name: Test
         run: go test ./... -count=1 -timeout 300s -race
+
+  # Direct Go ↔ Redisson 4.6.1 interop. Separate job so the main gate stays
+  # fast when only Go+Redis is needed; fails the PR if the probe regresses.
+  java-interop:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Install Maven
+        run: sudo apt-get update && sudo apt-get install -y maven
+      - name: Java interop
+        run: go test -run TestJavaInterop -count=1 -timeout 600s -v .

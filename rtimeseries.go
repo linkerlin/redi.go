@@ -142,6 +142,40 @@ func (s *RTimeSeries) Add(ctx context.Context, timestampMs int64, value any, lab
 	return err
 }
 
+// AddAll stores entries in one atomic script using the default Redisson TTL.
+func (s *RTimeSeries) AddAll(
+	ctx context.Context, entries ...TimeSeriesEntry,
+) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	now, err := s.serverNowMs(ctx)
+	if err != nil {
+		return err
+	}
+	args := make([]any, 0, 2+len(entries)*4)
+	args = append(args, 20, hundredYearsFrom(now))
+	for _, entry := range entries {
+		encoded, err := s.c.codec.Encode(entry.Value)
+		if err != nil {
+			return err
+		}
+		mark := byte(2)
+		label := ""
+		if entry.Label != "" {
+			mark = 3
+			label = entry.Label
+		}
+		args = append(args, entry.Timestamp, mark, encoded, label)
+	}
+	err = tsAddScript.Run(ctx, s.rc(),
+		[]string{s.name, s.timeoutSetName, s.sequenceName}, args...).Err()
+	if err == redis.Nil {
+		return nil
+	}
+	return err
+}
+
 // tsGetScript is Java's getEntryAsync: first unexpired entry at the exact
 // timestamp; returns {mark, ts, val, label} or nil. NOTE the unpack's
 // first return is the OUTER type byte (4); the label mark is the first
@@ -190,47 +224,298 @@ func (s *RTimeSeries) Get(ctx context.Context, timestampMs int64) (*TimeSeriesEn
 	return &TimeSeriesEntry{Timestamp: timestampMs, Value: decoded, Label: label}, nil
 }
 
-// tsRangeScript mirrors Java's entryRangeAsync: unexpired entries with
-// startTimestamp <= score <= endTimestamp, ascending, up to limit. The
-// label blob's first byte is the mark (2/3); labeled payloads drop it.
-var tsRangeScript = redis.NewScript(`
-local values = redis.call('zrangebyscore', KEYS[1], ARGV[2], ARGV[3], 'limit', 0, tonumber(ARGV[4]));
-local out = {};
+var tsGetAndRemoveScript = redis.NewScript(`
+local values = redis.call('zrangebyscore', KEYS[1], ARGV[2], ARGV[2])
 for i = 1, #values do
-    local expirationDate = redis.call('zscore', KEYS[2], values[i]);
+    local expirationDate = redis.call('zscore', KEYS[2], values[i])
     if expirationDate == false or tonumber(expirationDate) > tonumber(ARGV[1]) then
-        local n, t, val, label = struct.unpack('BBc0Lc0Lc0', values[i]);
-        local ts = redis.call('zscore', KEYS[1], values[i]);
-        local mark = string.byte(label, 1);
+        redis.call('zrem', KEYS[2], values[i])
+        redis.call('zrem', KEYS[1], values[i])
+        local n, t, val, label = struct.unpack('BBc0Lc0Lc0', values[i])
+        local mark = string.byte(label, 1)
         if mark == 2 then
-            table.insert(out, ts); table.insert(out, val); table.insert(out, '');
-        else
-            table.insert(out, ts); table.insert(out, val); table.insert(out, string.sub(label, 2));
+            return {ARGV[2], val, ''}
         end
-    end;
-end;
-return out;
+        return {ARGV[2], val, string.sub(label, 2)}
+    end
+end
+return nil
 `)
 
-// Range returns unexpired entries in [fromMs, toMs] ascending (limit <= 0
-// means unlimited; the effective limit is capped at 1000 like Java's
-// default batch).
-func (s *RTimeSeries) Range(ctx context.Context, fromMs, toMs int64, limit int64) ([]TimeSeriesEntry, error) {
-	if limit <= 0 {
-		limit = 1000
+// GetAndRemove removes and returns the first live value at timestampMs.
+func (s *RTimeSeries) GetAndRemove(
+	ctx context.Context, timestampMs int64,
+) (any, error) {
+	entry, err := s.GetAndRemoveEntry(ctx, timestampMs)
+	if err != nil || entry == nil {
+		return nil, err
 	}
+	return entry.Value, nil
+}
+
+// GetAndRemoveEntry removes and returns the first live entry at timestampMs.
+func (s *RTimeSeries) GetAndRemoveEntry(
+	ctx context.Context, timestampMs int64,
+) (*TimeSeriesEntry, error) {
 	now, err := s.serverNowMs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	res, err := tsRangeScript.Run(ctx, s.rc(),
-		[]string{s.name, s.timeoutSetName}, now, fromMs, toMs, limit).Slice()
+	res, err := tsGetAndRemoveScript.Run(ctx, s.rc(),
+		[]string{s.name, s.timeoutSetName}, now, timestampMs).Slice()
 	if err == redis.Nil {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	entries := s.decodeEntries(res)
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	return &entries[0], nil
+}
+
+var tsHeadTailScript = redis.NewScript(`
+local count = tonumber(ARGV[3]);
+if count == 0 then
+    return {};
+end;
+local cmd = 'zrange';
+if ARGV[2] == '1' then
+    cmd = 'zrevrange';
+end;
+local members = {};
+local scores = {};
+local total = redis.call('zcard', KEYS[1]);
+local offset = 0;
+local batch = 100;
+if count > batch then
+    batch = count;
+end;
+while offset < total and (count < 0 or #members < count) do
+    local values = redis.call(cmd, KEYS[1], offset, offset + batch - 1, 'withscores');
+    if #values == 0 then
+        break;
+    end;
+    for i = 1, #values, 2 do
+        local expirationDate = redis.call('zscore', KEYS[2], values[i]);
+        if expirationDate == false or tonumber(expirationDate) > tonumber(ARGV[1]) then
+            table.insert(members, values[i]);
+            table.insert(scores, values[i + 1]);
+            if count > 0 and #members == count then
+                break;
+            end;
+        end;
+    end;
+    offset = offset + #values / 2;
+end;
+if ARGV[4] == '1' then
+    for i = 1, #members do
+        redis.call('zrem', KEYS[1], members[i]);
+        redis.call('zrem', KEYS[2], members[i]);
+    end;
+end;
+local out = {};
+for i = 1, #members do
+    local n, t, val, label = struct.unpack('BBc0Lc0Lc0', members[i]);
+    local mark = string.byte(label, 1);
+    table.insert(out, scores[i]);
+    table.insert(out, val);
+    if mark == 2 then
+        table.insert(out, '');
+    else
+        table.insert(out, string.sub(label, 2));
+    end;
+end;
+return out;
+`)
+
+func (s *RTimeSeries) headTailEntries(
+	ctx context.Context,
+	reverse bool,
+	count int,
+	poll bool,
+) ([]TimeSeriesEntry, error) {
+	now, err := s.serverNowMs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reverseFlag := 0
+	if reverse {
+		reverseFlag = 1
+	}
+	pollFlag := 0
+	if poll {
+		pollFlag = 1
+	}
+	res, err := tsHeadTailScript.Run(ctx, s.rc(),
+		[]string{s.name, s.timeoutSetName}, now, reverseFlag, count, pollFlag).Slice()
+	if err == redis.Nil {
+		return []TimeSeriesEntry{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.decodeEntries(res), nil
+}
+
+// FirstEntry returns the earliest unexpired entry, or nil when empty.
+func (s *RTimeSeries) FirstEntry(ctx context.Context) (*TimeSeriesEntry, error) {
+	entries, err := s.headTailEntries(ctx, false, 1, false)
+	if err != nil || len(entries) == 0 {
+		return nil, err
+	}
+	return &entries[0], nil
+}
+
+// LastEntry returns the latest unexpired entry, or nil when empty.
+func (s *RTimeSeries) LastEntry(ctx context.Context) (*TimeSeriesEntry, error) {
+	entries, err := s.headTailEntries(ctx, true, 1, false)
+	if err != nil || len(entries) == 0 {
+		return nil, err
+	}
+	return &entries[0], nil
+}
+
+// FirstTimestamp returns the earliest unexpired timestamp, or zero when empty.
+func (s *RTimeSeries) FirstTimestamp(ctx context.Context) (int64, error) {
+	entry, err := s.FirstEntry(ctx)
+	if err != nil || entry == nil {
+		return 0, err
+	}
+	return entry.Timestamp, nil
+}
+
+// LastTimestamp returns the latest unexpired timestamp, or zero when empty.
+func (s *RTimeSeries) LastTimestamp(ctx context.Context) (int64, error) {
+	entry, err := s.LastEntry(ctx)
+	if err != nil || entry == nil {
+		return 0, err
+	}
+	return entry.Timestamp, nil
+}
+
+// FirstEntries returns up to count earliest unexpired entries in ascending order.
+func (s *RTimeSeries) FirstEntries(ctx context.Context, count int) ([]TimeSeriesEntry, error) {
+	return s.headTailEntries(ctx, false, count, false)
+}
+
+// LastEntries returns up to count latest unexpired entries in ascending order.
+func (s *RTimeSeries) LastEntries(ctx context.Context, count int) ([]TimeSeriesEntry, error) {
+	entries, err := s.headTailEntries(ctx, true, count, false)
+	reverseTimeSeriesEntries(entries)
+	return entries, err
+}
+
+// PollFirstEntries removes and returns up to count earliest unexpired entries.
+func (s *RTimeSeries) PollFirstEntries(ctx context.Context, count int) ([]TimeSeriesEntry, error) {
+	if count <= 0 {
+		return []TimeSeriesEntry{}, nil
+	}
+	return s.headTailEntries(ctx, false, count, true)
+}
+
+// PollLastEntries removes and returns up to count latest unexpired entries in ascending order.
+func (s *RTimeSeries) PollLastEntries(ctx context.Context, count int) ([]TimeSeriesEntry, error) {
+	if count <= 0 {
+		return []TimeSeriesEntry{}, nil
+	}
+	entries, err := s.headTailEntries(ctx, true, count, true)
+	reverseTimeSeriesEntries(entries)
+	return entries, err
+}
+
+// tsRangeScript mirrors Java's entryRangeAsync: unexpired entries with
+// startTimestamp <= score <= endTimestamp, in the requested order, up to
+// limit. The
+// label blob's first byte is the mark (2/3); labeled payloads drop it.
+var tsRangeScript = redis.NewScript(`
+local out = {};
+local cmd = 'zrangebyscore';
+local from = ARGV[2];
+local to = ARGV[3];
+if ARGV[5] == '1' then
+    cmd = 'zrevrangebyscore';
+    from = ARGV[3];
+    to = ARGV[2];
+end;
+local requested = tonumber(ARGV[4]);
+local offset = 0;
+while true do
+    local values;
+    local batch = 100;
+    if requested > 0 then
+        batch = math.max(batch, requested - #out / 3);
+        values = redis.call(cmd, KEYS[1], from, to, 'withscores', 'limit', offset, batch);
+    else
+        values = redis.call(cmd, KEYS[1], from, to, 'withscores');
+    end;
+    for i = 1, #values, 2 do
+        local expirationDate = redis.call('zscore', KEYS[2], values[i]);
+        if expirationDate == false or tonumber(expirationDate) > tonumber(ARGV[1]) then
+            local n, t, val, label = struct.unpack('BBc0Lc0Lc0', values[i]);
+            local mark = string.byte(label, 1);
+            table.insert(out, values[i + 1]);
+            table.insert(out, val);
+            if mark == 2 then
+                table.insert(out, '');
+            else
+                table.insert(out, string.sub(label, 2));
+            end;
+            if requested > 0 and #out / 3 == requested then
+                return out;
+            end;
+        end
+    end;
+    if requested <= 0 or #values / 2 < batch then
+        return out;
+    end;
+    offset = offset + #values / 2;
+end;
+`)
+
+// Range returns unexpired entries in [fromMs, toMs] ascending (limit <= 0
+// means unlimited).
+func (s *RTimeSeries) Range(ctx context.Context, fromMs, toMs int64, limit int64) ([]TimeSeriesEntry, error) {
+	now, err := s.serverNowMs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := tsRangeScript.Run(ctx, s.rc(),
+		[]string{s.name, s.timeoutSetName}, now, fromMs, toMs, limit, 0).Slice()
+	if err == redis.Nil {
+		return []TimeSeriesEntry{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.decodeEntries(res), nil
+}
+
+// RangeReversed returns unexpired entries in [fromMs, toMs] descending.
+// limit <= 0 means unlimited.
+func (s *RTimeSeries) RangeReversed(
+	ctx context.Context,
+	fromMs, toMs int64,
+	limit int64,
+) ([]TimeSeriesEntry, error) {
+	now, err := s.serverNowMs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := tsRangeScript.Run(ctx, s.rc(),
+		[]string{s.name, s.timeoutSetName}, now, fromMs, toMs, limit, 1).Slice()
+	if err == redis.Nil {
+		return []TimeSeriesEntry{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.decodeEntries(res), nil
+}
+
+func (s *RTimeSeries) decodeEntries(res []any) []TimeSeriesEntry {
 	out := make([]TimeSeriesEntry, 0, len(res)/3)
 	for i := 0; i+2 < len(res); i += 3 {
 		ts, _ := res[i].(string)
@@ -246,7 +531,13 @@ func (s *RTimeSeries) Range(ctx context.Context, fromMs, toMs int64, limit int64
 			Label:     label,
 		})
 	}
-	return out, nil
+	return out
+}
+
+func reverseTimeSeriesEntries(entries []TimeSeriesEntry) {
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
 }
 
 // tsSizeScript is Java's sizeAsync: ZCARD minus expired (lazy, no
@@ -283,6 +574,32 @@ func (s *RTimeSeries) Remove(ctx context.Context, timestampMs int64) (int64, err
 		return 0, err
 	}
 	return int64(len(members)), nil
+}
+
+var tsRemoveRangeScript = redis.NewScript(`
+local values = redis.call('zrangebyscore', KEYS[1], ARGV[2], ARGV[3])
+local removed = 0
+for i = 1, #values do
+    local expirationDate = redis.call('zscore', KEYS[2], values[i])
+    if expirationDate == false or tonumber(expirationDate) > tonumber(ARGV[1]) then
+        redis.call('zrem', KEYS[2], values[i])
+        redis.call('zrem', KEYS[1], values[i])
+        removed = removed + 1
+    end
+end
+return removed
+`)
+
+// RemoveRange removes live entries with timestamps in the inclusive range.
+func (s *RTimeSeries) RemoveRange(
+	ctx context.Context, fromMs, toMs int64,
+) (int64, error) {
+	now, err := s.serverNowMs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return tsRemoveRangeScript.Run(ctx, s.rc(),
+		[]string{s.name, s.timeoutSetName}, now, fromMs, toMs).Int64()
 }
 
 // Delete removes the series and its companion keys.

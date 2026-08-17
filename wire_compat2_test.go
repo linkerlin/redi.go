@@ -1,6 +1,7 @@
 package redi_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -274,5 +275,156 @@ func TestWire_LocalCachedMapDataIsRMapFormat(t *testing.T) {
 	}
 	if raw != `"v"` {
 		t.Fatalf("value = %q, want JSON-encoded", raw)
+	}
+}
+
+func TestWire_RSetCacheLayout(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "wire-sc")
+	idleKey := "redisson__idle__set:{" + name + "}"
+	t.Cleanup(func() { interopCleanup(t, name, idleKey) })
+	s := client.GetSetCache(name)
+	rc := rawClient(t)
+
+	if _, err := s.Add(testCtx, "forever", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	score, err := rc.ZScore(testCtx, name, `"forever"`).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Redis ZSET scores are float64; MaxInt64 is the no-TTL sentinel (lossy but stable).
+	if math.Abs(score-float64(math.MaxInt64)) > 1 {
+		t.Fatalf("no-TTL score = %v, want ~MaxInt64", score)
+	}
+
+	if _, err := s.Add(testCtx, "idleish", time.Hour, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	idle, err := rc.ZScore(testCtx, idleKey, `"idleish"`).Result()
+	if err != nil {
+		t.Fatalf("idle companion missing: %v", err)
+	}
+	if idle != float64((5 * time.Second).Milliseconds()) {
+		t.Fatalf("idle score = %v, want 5000 (duration ms)", idle)
+	}
+}
+
+func TestWire_RRingBufferLayout(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "wire-rb")
+	settings := "redisson_rb:{" + name + "}"
+	t.Cleanup(func() { interopCleanup(t, name, settings) })
+	r := client.GetRingBuffer(name)
+	rc := rawClient(t)
+
+	ok, err := r.TrySetCapacity(testCtx, 3)
+	if err != nil || !ok {
+		t.Fatalf("TrySetCapacity = %v, %v", ok, err)
+	}
+	capRaw, err := rc.Get(testCtx, settings).Result()
+	if err != nil || capRaw != "3" {
+		t.Fatalf("capacity key %q = %q, %v; want decimal \"3\"", settings, capRaw, err)
+	}
+	if err := r.Add(testCtx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Add(testCtx, "b"); err != nil {
+		t.Fatal(err)
+	}
+	typ, err := rc.Type(testCtx, name).Result()
+	if err != nil || typ != "list" {
+		t.Fatalf("ring type = %v, %v; want list", typ, err)
+	}
+	n, _ := rc.LLen(testCtx, name).Result()
+	if n != 2 {
+		t.Fatalf("llen = %d, want 2", n)
+	}
+}
+
+func TestWire_RIdGeneratorLayout(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "wire-id")
+	allocKey := "{" + name + "}:allocation"
+	t.Cleanup(func() { interopCleanup(t, name, allocKey) })
+	g := client.GetIdGenerator(name)
+	rc := rawClient(t)
+
+	ok, err := g.TryInit(testCtx, 100, 50)
+	if err != nil || !ok {
+		t.Fatalf("TryInit = %v, %v", ok, err)
+	}
+	cur, err := rc.Get(testCtx, name).Result()
+	if err != nil || cur != "100" {
+		t.Fatalf("counter = %q, %v; want \"100\"", cur, err)
+	}
+	alloc, err := rc.Get(testCtx, allocKey).Result()
+	if err != nil || alloc != "50" {
+		t.Fatalf("allocation = %q, %v; want \"50\"", alloc, err)
+	}
+}
+
+func TestWire_RSetMultimapLayout(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "wire-mm")
+	t.Cleanup(func() {
+		interopCleanup(t, name)
+		interopCleanupPattern(t, "{"+name+"}:*")
+	})
+	mm := client.GetSetMultimap(name)
+	rc := rawClient(t)
+
+	if _, err := mm.Put(testCtx, "lang", "go"); err != nil {
+		t.Fatal(err)
+	}
+	// HASH field = codec(key); value = HighwayHash-128 base64 id.
+	id, err := rc.HGet(testCtx, name, `"lang"`).Result()
+	if err != nil || id == "" {
+		t.Fatalf("internal id missing: %q, %v", id, err)
+	}
+	coll := "{" + name + "}:" + id
+	typ, err := rc.Type(testCtx, coll).Result()
+	if err != nil || typ != "set" {
+		t.Fatalf("collection %q type = %v, %v; want set", coll, typ, err)
+	}
+	ok, err := rc.SIsMember(testCtx, coll, `"go"`).Result()
+	if err != nil || !ok {
+		t.Fatalf("collection member missing: %v, %v", ok, err)
+	}
+}
+
+func TestWire_RTimeSeriesLayout(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "wire-ts")
+	ttlKey := "redisson__ts_ttl:{" + name + "}"
+	seqKey := "redisson__ts_seq:{" + name + "}"
+	t.Cleanup(func() { interopCleanup(t, name, ttlKey, seqKey) })
+	ts := client.GetTimeSeries(name)
+	rc := rawClient(t)
+
+	stamp := time.Now().UnixMilli()
+	if err := ts.Add(testCtx, stamp, "v1", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if typ, _ := rc.Type(testCtx, name).Result(); typ != "zset" {
+		t.Fatalf("series type = %q, want zset", typ)
+	}
+	if typ, _ := rc.Type(testCtx, ttlKey).Result(); typ != "zset" {
+		t.Fatalf("ttl companion type = %q, want zset", typ)
+	}
+	seq, err := rc.Get(testCtx, seqKey).Result()
+	if err != nil {
+		t.Fatal("seq companion:", err)
+	}
+	// Stored as decimal; Lua zero-pads only when formatting the member id.
+	if seq != "1" {
+		t.Fatalf("seq = %q, want \"1\" after first Add", seq)
+	}
+	members, err := rc.ZRange(testCtx, name, 0, 0).Result()
+	if err != nil || len(members) != 1 {
+		t.Fatalf("members = %v, %v", members, err)
+	}
+	if members[0][0] != 4 {
+		t.Fatalf("packed member type byte = %d, want 4", members[0][0])
 	}
 }

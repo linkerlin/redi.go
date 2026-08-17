@@ -1,44 +1,48 @@
 # redi.go
 
+**中文** | [English](README_EN.md)
+
 一个用 Pure Go 复刻 Redisson 的 Redis 客户端库，面向 **Redis 8.x**。
 **Wire format（key 布局 / Lua 算法 / 值编码）与 Java Redisson（JsonJacksonCodec 配置）及 [redi.py](https://github.com/linkerlin/redi.py) 对齐，可互操作**——详见 [COMPATIBILITY.md](COMPATIBILITY.md)。
-已通过 **Go ↔ 真实 Redisson 4.6.1 直接双向互操作测试**（锁互斥、值编码、Bloom 哈希、限流共享窗口、跨语言唤醒等 7 组用例）与 Go ↔ redi.py 双向回归（10 组）。
+已通过 **Go ↔ 真实 Redisson 4.6.1 直接双向互操作测试**（24 个 `TestJavaInterop_*` 测试函数）与 Go ↔ redi.py 双向回归（含 Multimap 等）。`Client.Get*` 工厂当前覆盖 **66 种唯一 R* 返回类型**。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 特性
 
 | 特性 | 说明 |
 |---|---|
-| **RLock** | 分布式可重入锁：Redisson 原版 HASH + Lua，pub/sub 唤醒（~0ms），watchdog 自动续期 |
+| **RLock / RFairLock / RSpinLock / RNonReentrantLock / RNonReentrantFairLock** | 可重入、公平 FIFO、自旋与禁止重入锁；支持固定租约或 watchdog |
 | **RReadWriteLock** | 单 HASH + mode 字段的原子读写锁（含同线程 write→read 降级） |
 | **RSemaphore / RCountDownLatch** | 分布式信号量 / 倒计时闩，pub/sub 唤醒 |
 | **RRateLimiter** | 滑动窗口限流器，配置持久化到 Redis（跨进程生效），Redisson 4.6 二进制格式 |
-| **RMap / RMapCache** | 分布式 Hash（MapCache 支持每 entry TTL + maxIdle + Redisson struct 打包格式 + entry 事件） |
-| **RSetCache** | 带 TTL/maxIdle 的集合（单 ZSET，Redisson 格式） |
-| **RMultimap（Set/List）** | 一键多值；内部 ID = HighwayHash-128 大端 base64，与 Redisson 字节级一致 |
-| **RList / RSet / RQueue / RDeque / RBlockingQueue / RBlockingDeque** | 集合与队列全家桶（阻塞消费双端） |
-| **RDelayedQueue** | 延迟队列（ZSET + 后台迁移 + Redis 服务器时钟） |
-| **RScoredSortedSet** | 有序集合（ZSET） |
+| **RMap / RMapCache / RMapCacheNative** | 分布式 Hash；MapCache 支持 entry TTL/maxIdle、packed 表面与容量淘汰；MapCacheNative 用 Redis HPEXPIRE（≥7.4）；Map key 可派生 Lock/FairLock/RWLock/Semaphore |
+| **RSetCache** | 带 TTL/maxIdle 的集合（单 ZSET，含随机/批量集合表面，Redisson 格式） |
+| **RMultimap / RMultimapCache / *CacheNative（Set/List）** | 一键多值；内部 ID = HighwayHash-128 大端 base64；Cache 按 key TTL；Native 用 HPEXPIRE+PEXPIRE |
+| **RList / RSet / RQueue / RDeque / RBlockingQueue / RBlockingDeque / RBoundedBlockingQueue** | 集合与队列全家桶；有界阻塞队列使用 `redisson_bqs:{name}` 容量 companion |
+| **RDelayedQueue** | 延迟队列（timeout ZSET + packed LIST + 后台迁移；支持待投递项查询/删除/清空） |
+| **RScoredSortedSet / RLexSortedSet** | 分数/字典序集合（rank、随机、首尾弹出、正反向范围；Lex 成员裸存储） |
 | **RBucket** | 对象桶（毫秒 TTL、CAS、GetAndDelete…） |
+| **RBinaryStream** | 原始字节流（APPEND/GETRANGE/SETRANGE、顺序流与可 seek 通道，不经过 Codec） |
 | **RAtomicLong / RAtomicDouble** | 原子计数器（十进制字符串，CAS） |
 | **RTopic / RPatternTopic** | 发布订阅（含模式订阅） |
-| **RBloomFilter** | 布隆过滤器（HighwayHash-128，与 Redisson 位级对齐） |
+| **RBloomFilter / RBloomFilterNative / RCuckooFilter / RTopK / RTDigest / RGcra** | 自研布隆 / Redis BF.* / CF.* / TOPK.* / TDIGEST.* / GCRA（命令缺失时测试自动 skip） |
 | **RIdGenerator** | ID 生成器（批量分配缓存） |
-| **RLexSortedSet** | 字典序集合（裸成员，Redisson 特例） |
 | **RTransferQueue** | 跨队列原子迁移（单 Lua） |
-| **RHyperLogLog / RGeo / RBitSet / RStream** | 基数估计 / 地理索引（GEOSEARCH）/ 分布式位图（Java 位序）/ 分布式日志（消费组、Pending、Claim/AutoClaim） |
+| **RHyperLogLog / RGeo / RBitSet / RStream** | 基数估计 / 地理索引（批量 GEO、GEOSEARCHSTORE）/ 分布式位图（Java 位序）/ 分布式日志（消费组、Pending、Claim/AutoClaim） |
 | **RPermitExpirableSemaphore / RReliableTopic** | 按许可独立租约过期的信号量 / Stream 可靠广播主题（每订阅者独立消费组 + 崩溃重投递） |
 | **RLocalCachedMap** | 近端缓存 Map（写穿 + 跨实例失效广播；数据层 RMap wire 格式，Java 可直读） |
-| **RPriorityQueue** | ZSET 优先级队列（低分先出） |
+| **RPriorityQueue / RPriorityBlockingQueue / RPriorityBlockingDeque / RPriorityDeque** | ZSET+score 优先队列及阻塞/双端包装（**非** Java Comparator 同名协议） |
+| **RArray** | Redis 8.8+ ARRAY（ARSET/ARGET/…；命令缺失时测试 skip） |
+| **RClientSideCaching** | PARTIAL：`Config.ClientSideCaching` 或 `GetClientSideCachingWithOptions`（独立 RESP3 跟踪池）；非 Java EvictionPolicy 读代理 |
 | **RLongAdder / RDoubleAdder** | 高争用计数器：本地零网络累积，`Sum()` 跨实例（含 Java）协同 flush；非破坏性 |
-| **RFencedLock / RMultiLock** | 栅栏令牌锁（每次获取 INCR token，防锁过期脑裂）/ 多锁全有或全无（失败回滚） |
-| **RTimeSeries** | 时间序列（序列号去重同刻条目、每条目 TTL、惰性过期 size，Redisson wire 兼容） |
+| **RFencedLock / RMultiLock / RRedLock** | 栅栏令牌锁 / 多锁全有或全无 / RedLock 严格多数派（失败回滚） |
+| **RTimeSeries** | 时间序列（同刻多条、entry TTL、首尾读取/弹出、正反向范围，Redisson wire 兼容） |
 | **RRingBuffer / RShardedTopic / RFunction** | 定容环形缓冲（溢出淘汰最旧）/ Redis 7+ 分片 pub/sub（SSUBSCRIBE，cluster 友好）/ Redis Functions（FUNCTION/FCALL） |
 | **RKeys / RBuckets / RScript** | 键空间管理（SCAN/模式删除）/ 批量桶（MSET/MGET）/ Lua 脚本执行 |
 | **RBatch** | 管道批处理（`NewBatch()` → 结构写操作入队 → `Execute()` 单次往返，实测 **~7x** 加速） |
 | **多拓扑** | single / cluster / sentinel（redis.UniversalClient） |
 | **TUI Dashboard** | 基于 charmbracelet/bubbles 的终端监控面板 |
 
-值编码默认 `JSONCodec`：与 Redisson `JsonJacksonCodec` 互通（超 int32 的整数自动包裹 `["java.lang.Long",v]`，解码剥离 `@class` 类型信息），可通过 `Config.Codec` 替换。
+值编码默认 `JSONCodec`：与 Redisson `JsonJacksonCodec` 互通（超 int32 的整数自动包裹 `["java.lang.Long",v]`，解码剥离 `@class` 类型信息），可通过 `Config.Codec` 替换。结构化读取可用 `GetInto` / `PeekInto` / `PollInto` / `Remove*Into`（`RBucket` / `RMap` / `RList` / `RQueue` / `RDeque` / `RLocalCachedMap`）绑定到类型化指针；`RMap` 另有 `PutAll` / `FastPut*` / `Replace*` / `Keys` / `Values`。
 
 ## 依赖
 
@@ -148,7 +152,7 @@ if err := dashboard.Run(client.Redis(), "order-lock", "job-*"); err != nil {
 go test ./...          # 需要本地 Redis（localhost:6379），无 Redis 自动 skip
 go test -race ./...    # CI 完整模式
 go test -run TestInterop -v .        # Go ↔ redi.py 双向互操作（需 Python + redi.py，缺失自动 skip）
-go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1 直接双向（需 java+mvn，首次自动编译探针）
+go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1 直接双向（需 java+mvn，首次自动编译探针；CI 有独立 java-interop job）
 go test -bench . -benchtime 1s .     # 基准
 go vet ./...
 ```
@@ -157,4 +161,4 @@ wire-format 契约测试在 `wire_compat_test.go`；跨语言双向回归在 `in
 
 ## 版本
 
-见 [CHANGELOG.md](CHANGELOG.md)。v0.2.0 起 key 不再带 `redi:` 私有前缀（破坏性变更，换取互操作）。
+见 [CHANGELOG.md](CHANGELOG.md)。v0.2.0 起 key 不再带 `redi:` 私有前缀（破坏性变更，换取互操作）。贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。

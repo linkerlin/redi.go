@@ -12,7 +12,7 @@ Pure Go 复刻 Redisson（面向 Redis 8.x）。**wire format（key 布局/Lua �
 go vet ./... && go test -race ./... -count=1 -timeout 600s   # 全量（本机需 Redis localhost:6379，缺失自动 skip）
 golangci-lint run ./... --timeout 300s                        # CI 门禁，必须 0 issues
 go test -run TestInterop -v .          # Go ↔ redi.py（需 Python + C:/GitHub/redi.py）
-go test -run TestJavaInterop -v .      # Go ↔ Redisson 4.6.1（需 java+mvn；探针首次自动编译，之后单 JVM 复用）
+go test -run TestJavaInterop -v .      # Go ↔ Redisson 4.6.1（需 java+mvn；探针首次自动编译，之后单 JVM 复用；CI 有独立 java-interop job）
 go test -bench . -benchtime 1s -run XXX_none .   # 基准
 ```
 
@@ -36,7 +36,7 @@ go test -bench . -benchtime 1s -run XXX_none .   # 基准
 2. 实现：嵌入 `rObject`，走 `c.codec` 编解码，Lua 用 `redis.NewScript`。
 3. `Client` 加工厂方法（Redisson 风格名 + 必要时旧别名）。
 4. 测试：单元测试 + （涉及 wire 时）`wire_compat_test.go` 契约断言 + Java interop 用例（`interop/java-probe/RedigoProbe.java` 加命令 → `interop_java*_test.go` 断言）。
-5. 文档四处同步：README 特性表、COMPATIBILITY.md 矩阵行、CHANGELOG、演进方案.md 执行状态。
+5. 文档四处同步：README / README_EN 特性表、COMPATIBILITY.md 矩阵行、CHANGELOG、演进方案.md 执行状态。
 
 ## 测试约定
 
@@ -47,7 +47,13 @@ go test -bench . -benchtime 1s -run XXX_none .   # 基准
 
 ## 已知不做（勿重复提案）
 
-- RSortedSet（LIST+Comparator 版）—— 勿用 ZSET 冒充。
-- RTransaction —— Redisson 为快照回滚语义（operation log + 回滚），非 MULTI/EXEC 原子提交；勿用 TxPipeline 冒充。
-- Java LocalCachedMapInvalidation 二进制失效协议（keyHash + 更新日志 + Java 序列化）—— Go 失效广播为内部协议，COMPATIBILITY 已标注。
-- reactive/RxJava 范式、手写连接池、RExecutorService/RRemoteService 的 Java 互操作。
+- RSortedSet（LIST+Comparator 版）—— 勿用 ZSET 冒充；无公开可移植 Comparator 序列化。
+- RPriorityBlockingQueue / RPriorityBlockingDeque / RPriorityDeque：**已提供 ZSET+score 包装**（`GetPriorityBlocking*` / `GetPriorityDeque`），**明确非 Java Comparator 协议**，不可与 `getPriority*()` 互操作。
+- RTransaction —— Redisson 为快照回滚语义（operation log + 回滚），非 MULTI/EXEC 原子提交；勿用 TxPipeline 冒充。OSS 可对照但完整移植成本高，本库拒绝假实现。
+- Java LocalCachedMapInvalidation 二进制失效协议（keyHash + 更新日志 + Java 序列化）—— Go 失效广播为内部协议，COMPATIBILITY 已标注；未证明可忠实移植前保持诚实。
+- reactive/RxJava 范式 —— 本库为同步 Go API，不做 reactive 冒充。
+- RExecutorService / RRemoteService 的 Java 互操作 —— 依赖 Java 类加载/远程调用协议，Go sync 库不做假实现。
+- LiveObject —— 依赖 Java 字节码增强，REFUSE_AS_FAKE。
+- **Redisson PRO-only**（开源 `Redisson.java` 直接抛 `UnsupportedOperationException`，无公开 wire/Lua）：`RReliableQueue`、`RLocalCachedMapCache`、`RReliablePubSubTopic`、`RBitVectorStore` —— **开源不可复刻**，不做 panic stub / 冒充。
+- `RClientSideCaching` —— **PARTIAL**：`Config.ClientSideCaching` 或 `GetClientSideCachingWithOptions` 打开 go-redis RESP3 CLIENT TRACKING（standalone DB0）；工厂门面转发结构。**非** Java 整结构读代理 + EvictionPolicy（LRU/LFU/SOFT/WEAK）模型。Cluster/Sentinel 未接线。
+- `RArray` —— **已实现** Redis 8.8+ ARRAY（`GetArray`）；命令缺失时测试 skip。

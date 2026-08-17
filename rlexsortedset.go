@@ -50,6 +50,41 @@ func (s *RLexSortedSet) Size(ctx context.Context) (int64, error) {
 	return s.rc().ZCard(ctx, s.name).Result()
 }
 
+// Rank returns the 0-based ascending rank, or -1 when absent.
+func (s *RLexSortedSet) Rank(ctx context.Context, element string) (int64, error) {
+	rank, err := s.rc().ZRank(ctx, s.name, element).Result()
+	if err == redis.Nil {
+		return -1, nil
+	}
+	return rank, err
+}
+
+// RevRank returns the 0-based descending rank, or -1 when absent.
+func (s *RLexSortedSet) RevRank(ctx context.Context, element string) (int64, error) {
+	rank, err := s.rc().ZRevRank(ctx, s.name, element).Result()
+	if err == redis.Nil {
+		return -1, nil
+	}
+	return rank, err
+}
+
+// Random returns one random member, or "" when empty.
+func (s *RLexSortedSet) Random(ctx context.Context) (string, error) {
+	values, err := s.rc().ZRandMember(ctx, s.name, 1).Result()
+	if err != nil || len(values) == 0 {
+		return "", err
+	}
+	return values[0], nil
+}
+
+// RandomN returns random members using Redis ZRANDMEMBER count semantics.
+func (s *RLexSortedSet) RandomN(ctx context.Context, count int) ([]string, error) {
+	if count == 0 {
+		return []string{}, nil
+	}
+	return s.rc().ZRandMember(ctx, s.name, count).Result()
+}
+
 // lexOpt builds a ZRangeBy with optional offset/count.
 func lexOpt(min, max string, offset, count int64) *redis.ZRangeBy {
 	by := &redis.ZRangeBy{Min: min, Max: max}
@@ -67,14 +102,35 @@ func (s *RLexSortedSet) RangeByLex(ctx context.Context, min, max string, offset,
 	return s.rc().ZRangeByLex(ctx, s.name, lexOpt("["+min, "["+max, offset, count)).Result()
 }
 
+// RangeByLexReversed returns the inclusive [min, max] range in reverse order.
+func (s *RLexSortedSet) RangeByLexReversed(
+	ctx context.Context, min, max string, offset, count int64,
+) ([]string, error) {
+	return s.rc().ZRevRangeByLex(ctx, s.name, lexOpt("["+min, "["+max, offset, count)).Result()
+}
+
 // RangeHead returns members lexicographically before toValue (open range).
 func (s *RLexSortedSet) RangeHead(ctx context.Context, toValue string, offset, count int64) ([]string, error) {
 	return s.rc().ZRangeByLex(ctx, s.name, lexOpt("-", "("+toValue, offset, count)).Result()
 }
 
+// RangeHeadReversed returns members before toValue in reverse order.
+func (s *RLexSortedSet) RangeHeadReversed(
+	ctx context.Context, toValue string, offset, count int64,
+) ([]string, error) {
+	return s.rc().ZRevRangeByLex(ctx, s.name, lexOpt("-", "("+toValue, offset, count)).Result()
+}
+
 // RangeTail returns members lexicographically after fromValue (open range).
 func (s *RLexSortedSet) RangeTail(ctx context.Context, fromValue string, offset, count int64) ([]string, error) {
 	return s.rc().ZRangeByLex(ctx, s.name, lexOpt("("+fromValue, "+", offset, count)).Result()
+}
+
+// RangeTailReversed returns members after fromValue in reverse order.
+func (s *RLexSortedSet) RangeTailReversed(
+	ctx context.Context, fromValue string, offset, count int64,
+) ([]string, error) {
+	return s.rc().ZRevRangeByLex(ctx, s.name, lexOpt("("+fromValue, "+", offset, count)).Result()
 }
 
 // CountHead counts members before toValue (open range).
@@ -148,6 +204,11 @@ func (s *RLexSortedSet) PollLast(ctx context.Context) (string, error) {
 // Range returns members by rank [start, stop].
 func (s *RLexSortedSet) Range(ctx context.Context, start, stop int64) ([]string, error) {
 	return s.rc().ZRange(ctx, s.name, start, stop).Result()
+}
+
+// RangeReversed returns members by descending rank [start, stop].
+func (s *RLexSortedSet) RangeReversed(ctx context.Context, start, stop int64) ([]string, error) {
+	return s.rc().ZRevRange(ctx, s.name, start, stop).Result()
 }
 
 // Clear removes the set.

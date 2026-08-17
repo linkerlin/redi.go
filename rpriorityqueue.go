@@ -6,9 +6,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RPriorityQueue is a distributed priority queue backed by a ZSET: score
-// decides priority (lower score = higher priority, polled first). Members
-// are codec-encoded like every other structure.
+// RPriorityQueue is a ZSET-backed priority queue: lower score is polled
+// first. Members are codec-encoded.
+//
+// Compatibility note: this is NOT Redisson's RPriorityQueue (LIST +
+// Comparator). Java getPriorityQueue() will not interoperate with this
+// structure. Use it as a Redis-native scored priority queue, or read the
+// same ZSET via RScoredSortedSet / raw Redis.
 type RPriorityQueue struct {
 	rObject
 }

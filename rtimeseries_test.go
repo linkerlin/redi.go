@@ -74,6 +74,83 @@ func TestRTimeSeries(t *testing.T) {
 	}
 }
 
+func TestRTimeSeries_HeadTailRangeAndPoll(t *testing.T) {
+	client := newTestClient(t)
+	s := client.GetTimeSeries(uniqueKey(t, "ts-head-tail"))
+	defer s.Delete(testCtx) //nolint:errcheck
+
+	first, err := s.FirstEntry(testCtx)
+	if err != nil || first != nil {
+		t.Fatalf("FirstEntry(empty) = %+v, %v", first, err)
+	}
+	if ts, err := s.LastTimestamp(testCtx); err != nil || ts != 0 {
+		t.Fatalf("LastTimestamp(empty) = %d, %v", ts, err)
+	}
+
+	base := int64(1700000100000)
+	for _, entry := range []struct {
+		timestamp int64
+		value     string
+		label     string
+	}{
+		{base, "one", ""},
+		{base + 1000, "two", "middle"},
+		{base + 2000, "three", ""},
+	} {
+		if err := s.Add(testCtx, entry.timestamp, entry.value, entry.label, 0); err != nil {
+			t.Fatal("Add:", err)
+		}
+	}
+
+	first, err = s.FirstEntry(testCtx)
+	if err != nil || first == nil || first.Timestamp != base || first.Value != "one" {
+		t.Fatalf("FirstEntry = %+v, %v", first, err)
+	}
+	last, err := s.LastEntry(testCtx)
+	if err != nil || last == nil || last.Timestamp != base+2000 || last.Value != "three" {
+		t.Fatalf("LastEntry = %+v, %v", last, err)
+	}
+	if ts, err := s.FirstTimestamp(testCtx); err != nil || ts != base {
+		t.Fatalf("FirstTimestamp = %d, %v", ts, err)
+	}
+	if ts, err := s.LastTimestamp(testCtx); err != nil || ts != base+2000 {
+		t.Fatalf("LastTimestamp = %d, %v", ts, err)
+	}
+
+	entries, err := s.FirstEntries(testCtx, 2)
+	if err != nil || len(entries) != 2 ||
+		entries[0].Value != "one" || entries[1].Value != "two" ||
+		entries[1].Label != "middle" {
+		t.Fatalf("FirstEntries = %+v, %v", entries, err)
+	}
+	entries, err = s.LastEntries(testCtx, 2)
+	if err != nil || len(entries) != 2 ||
+		entries[0].Value != "two" || entries[1].Value != "three" {
+		t.Fatalf("LastEntries = %+v, %v", entries, err)
+	}
+	entries, err = s.RangeReversed(testCtx, base, base+2000, 2)
+	if err != nil || len(entries) != 2 ||
+		entries[0].Value != "three" || entries[1].Value != "two" {
+		t.Fatalf("RangeReversed = %+v, %v", entries, err)
+	}
+
+	entries, err = s.PollFirstEntries(testCtx, 1)
+	if err != nil || len(entries) != 1 || entries[0].Value != "one" {
+		t.Fatalf("PollFirstEntries = %+v, %v", entries, err)
+	}
+	if entries, err = s.PollLastEntries(testCtx, 0); err != nil || len(entries) != 0 {
+		t.Fatalf("PollLastEntries(0) = %+v, %v", entries, err)
+	}
+	entries, err = s.PollLastEntries(testCtx, 2)
+	if err != nil || len(entries) != 2 ||
+		entries[0].Value != "two" || entries[1].Value != "three" {
+		t.Fatalf("PollLastEntries = %+v, %v", entries, err)
+	}
+	if n, err := s.Size(testCtx); err != nil || n != 0 {
+		t.Fatalf("Size after polls = %d, %v", n, err)
+	}
+}
+
 // TestJavaInterop_RTimeSeries: Go-written entries decode through real
 // Redisson, and vice versa.
 func TestJavaInterop_RTimeSeries(t *testing.T) {

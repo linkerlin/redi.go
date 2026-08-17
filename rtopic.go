@@ -70,6 +70,35 @@ func (t *RTopic) Unsubscribe(id int) bool {
 	return ok
 }
 
+// CountListeners returns the number of local listeners.
+func (t *RTopic) CountListeners() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.listeners)
+}
+
+// RemoveAllListeners unregisters every local listener.
+func (t *RTopic) RemoveAllListeners() {
+	t.mu.Lock()
+	t.listeners = make(map[int]func(msg any))
+	stop := t.stop
+	t.stop = nil
+	t.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
+// ChannelNames returns the Redis channels used by this topic.
+func (t *RTopic) ChannelNames() []string {
+	return []string{t.name}
+}
+
+// GetChannelNames is the Redisson-style alias of ChannelNames.
+func (t *RTopic) GetChannelNames() []string {
+	return t.ChannelNames()
+}
+
 // CountSubscribers returns the number of remote subscribers (PUBSUB NUMSUB).
 func (t *RTopic) CountSubscribers(ctx context.Context) (int64, error) {
 	m, err := t.rc().PubSubNumSub(ctx, t.name).Result()
@@ -165,6 +194,25 @@ func (t *RPatternTopic) Unsubscribe(id int) bool {
 		stop()
 	}
 	return ok
+}
+
+// CountListeners returns the number of local pattern listeners.
+func (t *RPatternTopic) CountListeners() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.listeners)
+}
+
+// RemoveAllListeners unregisters every local pattern listener.
+func (t *RPatternTopic) RemoveAllListeners() {
+	t.mu.Lock()
+	t.listeners = make(map[int]func(channel string, msg any))
+	stop := t.stop
+	t.stop = nil
+	t.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 func (t *RPatternTopic) startListening() error {

@@ -55,6 +55,64 @@ func TestRKeys(t *testing.T) {
 	}
 }
 
+func TestRKeys_SyncAPIs(t *testing.T) {
+	client := newTestClient(t)
+	keys := client.GetKeys()
+	name := uniqueKey(t, "keys-sync")
+	renamed := name + ":renamed"
+	occupied := name + ":occupied"
+	defer keys.Delete(testCtx, name, renamed, occupied) //nolint:errcheck
+
+	if err := client.GetBucket(name).Set(testCtx, "v"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := keys.Touch(testCtx, name); err != nil || n != 1 {
+		t.Fatalf("Touch = %d, %v", n, err)
+	}
+	if ok, err := keys.Expire(testCtx, name, 3*time.Second); err != nil || !ok {
+		t.Fatalf("Expire = %v, %v", ok, err)
+	}
+	if ttl, err := keys.RemainTTL(testCtx, name); err != nil || ttl <= 0 {
+		t.Fatalf("RemainTTL = %v, %v", ttl, err)
+	}
+	if ok, err := keys.ClearExpire(testCtx, name); err != nil || !ok {
+		t.Fatalf("ClearExpire = %v, %v", ok, err)
+	}
+	if ok, err := keys.ExpireAt(testCtx, name, time.Now().Add(3*time.Second)); err != nil || !ok {
+		t.Fatalf("ExpireAt = %v, %v", ok, err)
+	}
+	if err := client.GetBucket(occupied).Set(testCtx, "occupied"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := keys.RenameNX(testCtx, name, occupied); err != nil || ok {
+		t.Fatalf("RenameNX occupied = %v, %v", ok, err)
+	}
+	if _, err := keys.Delete(testCtx, occupied); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := keys.RenameNX(testCtx, name, renamed); err != nil || !ok {
+		t.Fatalf("RenameNX = %v, %v", ok, err)
+	}
+	if err := keys.Rename(testCtx, renamed, name); err != nil {
+		t.Fatal("Rename:", err)
+	}
+
+	cfg := redi.DefaultConfig()
+	cfg.DB = 1
+	db1, err := redi.NewClient(cfg)
+	if err != nil {
+		t.Fatal("NewClient db 1:", err)
+	}
+	t.Cleanup(func() { _ = db1.Close() })
+	t.Cleanup(func() { _, _ = db1.GetKeys().Delete(testCtx, name) })
+	if ok, err := keys.Move(testCtx, name, 1); err != nil || !ok {
+		t.Fatalf("Move to db 1 = %v, %v", ok, err)
+	}
+	if ok, err := db1.GetKeys().Move(testCtx, name, 0); err != nil || !ok {
+		t.Fatalf("Move to db 0 = %v, %v", ok, err)
+	}
+}
+
 func TestRBuckets(t *testing.T) {
 	client := newTestClient(t)
 	buckets := client.GetBuckets()

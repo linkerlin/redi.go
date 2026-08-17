@@ -3,6 +3,7 @@ package redigo;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.redisson.Redisson;
 import org.redisson.api.RAtomicLong;
+import org.redisson.api.RBinaryStream;
 import org.redisson.api.RBloomFilter;
 import org.redisson.api.RBucket;
 import org.redisson.api.RBlockingQueue;
@@ -24,7 +25,9 @@ import org.redisson.codec.JsonJacksonCodec;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -41,7 +44,9 @@ public final class RedigoProbe {
     private static RedissonClient rs;
     private static final ObjectMapper OM = new ObjectMapper();
     private static RLock heldLock;
+    private static RLock heldFair;
     private static RReadWriteLock heldRwLock;
+    private static org.redisson.api.RFencedLock heldFenced;
     private static String heldPermit;
     private static org.redisson.api.RLongAdder heldAdder;
     private static final java.util.concurrent.BlockingQueue<
@@ -78,6 +83,9 @@ public final class RedigoProbe {
         if (heldLock != null && heldLock.isHeldByCurrentThread()) {
             heldLock.unlock();
         }
+        if (heldFair != null && heldFair.isHeldByCurrentThread()) {
+            heldFair.unlock();
+        }
         if (heldRwLock != null && heldRwLock.writeLock().isHeldByCurrentThread()) {
             heldRwLock.writeLock().unlock();
         }
@@ -111,6 +119,55 @@ public final class RedigoProbe {
                 }
                 heldLock = null;
                 reply(map("released", true));
+            }
+
+            case "fair_try" -> {
+                RLock l = rs.getFairLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                if (acq) {
+                    l.unlock();
+                }
+                reply(map("acquired", acq));
+            }
+            case "fair_hold" -> {
+                RLock l = rs.getFairLock(a[1]);
+                boolean acq = l.tryLock(0, 30000, TimeUnit.MILLISECONDS);
+                heldFair = acq ? l : null;
+                reply(map("acquired", acq));
+            }
+            case "fair_unlock" -> {
+                if (heldFair != null && heldFair.isHeldByCurrentThread()) {
+                    heldFair.unlock();
+                }
+                heldFair = null;
+                reply(map("ok", true));
+            }
+            case "fair_held" -> {
+                RLock l = rs.getFairLock(a[1]);
+                reply(map("held", l.isHeldByCurrentThread()));
+            }
+
+            case "fenced_try" -> {
+                org.redisson.api.RFencedLock fl = rs.getFencedLock(a[1]);
+                Long token = fl.tryLockAndGetToken(0, 60000, TimeUnit.MILLISECONDS);
+                if (token != null) {
+                    heldFenced = fl;
+                }
+                reply(map("token", token));
+            }
+            case "fenced_token" -> {
+                org.redisson.api.RFencedLock fl = rs.getFencedLock(a[1]);
+                reply(map("token", fl.getToken()));
+            }
+            case "fenced_release" -> {
+                if (heldFenced != null && heldFenced.isHeldByCurrentThread()) {
+                    // Drain re-entrancy so the key is fully released.
+                    while (heldFenced.isHeldByCurrentThread()) {
+                        heldFenced.unlock();
+                    }
+                }
+                heldFenced = null;
+                reply(map("ok", true));
             }
 
             case "map_put" -> {
@@ -193,6 +250,24 @@ public final class RedigoProbe {
             case "bucket_get" -> {
                 RBucket<Object> b = rs.getBucket(a[1]);
                 reply(map("value", b.get()));
+            }
+            case "binary_set" -> {
+                RBinaryStream s = rs.getBinaryStream(a[1]);
+                byte[] value = Base64.getDecoder().decode(a[2]);
+                s.set(value);
+                reply(map("size", s.size()));
+            }
+            case "binary_get" -> {
+                RBinaryStream s = rs.getBinaryStream(a[1]);
+                byte[] value = s.get();
+                reply(map("value", value == null ? null : Base64.getEncoder().encodeToString(value)));
+            }
+            case "binary_channel_write" -> {
+                RBinaryStream s = rs.getBinaryStream(a[1]);
+                var channel = s.getChannel();
+                channel.position(Long.parseLong(a[2]));
+                int written = channel.write(ByteBuffer.wrap(Base64.getDecoder().decode(a[3])));
+                reply(map("written", written));
             }
 
             case "mapcache_put" -> {

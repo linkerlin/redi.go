@@ -67,6 +67,32 @@ type Config struct {
 	// Logger receives background-goroutine error reports.
 	// Defaults to the standard log package.
 	Logger Logger
+	// Protocol is the RESP version passed to go-redis (2 or 3). Zero lets
+	// go-redis pick its default (currently 3). Required to be 3 when
+	// ClientSideCaching is set.
+	Protocol int
+	// ClientSideCaching enables go-redis RESP3 client-side caching on
+	// standalone ModeSingle clients (DB 0). Cluster/Sentinel ignore this
+	// option. Prefer GetClientSideCachingWithOptions for a Redisson-shaped
+	// runtime scope that owns its own tracked connection pool.
+	ClientSideCaching *ClientSideCachingOptions
+}
+
+// ClientSideCachingOptions configures go-redis ClientSideCacheConfig (alias of
+// CacheConfig). Eviction is LRU-ish inside go-redis LocalCache — not Java's
+// EvictionPolicy enum (LRU/LFU/SOFT/WEAK).
+type ClientSideCachingOptions struct {
+	// MaxEntries limits cached replies; ≤0 lets go-redis apply its default bound.
+	MaxEntries int
+	// MaxMemoryBytes limits estimated cache memory; ≤0 means unlimited (subject
+	// to MaxEntries defaulting).
+	MaxMemoryBytes int64
+	// DrainInterval bounds how often buffered invalidate frames are drained
+	// (go-redis default ~5ms when zero).
+	DrainInterval time.Duration
+	// MaxStaleness caps how long a cached entry may be served without a fresh
+	// fetch (0 = disabled). A backstop for lost invalidations.
+	MaxStaleness time.Duration
 }
 
 // DefaultConfig returns a Config with sensible defaults for Redis 8.x.
@@ -127,7 +153,7 @@ func NewClient(cfg Config) (*Client, error) {
 	var rc redis.UniversalClient
 	switch cfg.Mode {
 	case ModeCluster:
-		rc = redis.NewClusterClient(&redis.ClusterOptions{
+		opt := &redis.ClusterOptions{
 			Addrs:        cfg.Addrs,
 			Username:     cfg.Username,
 			Password:     cfg.Password,
@@ -135,9 +161,13 @@ func NewClient(cfg Config) (*Client, error) {
 			DialTimeout:  cfg.DialTimeout,
 			ReadTimeout:  cfg.ReadTimeout,
 			WriteTimeout: cfg.WriteTimeout,
-		})
+		}
+		if cfg.Protocol >= 2 {
+			opt.Protocol = cfg.Protocol
+		}
+		rc = redis.NewClusterClient(opt)
 	case ModeSentinel:
-		rc = redis.NewFailoverClient(&redis.FailoverOptions{
+		opt := &redis.FailoverOptions{
 			MasterName:    cfg.MasterName,
 			SentinelAddrs: cfg.Addrs,
 			Username:      cfg.Username,
@@ -147,9 +177,13 @@ func NewClient(cfg Config) (*Client, error) {
 			DialTimeout:   cfg.DialTimeout,
 			ReadTimeout:   cfg.ReadTimeout,
 			WriteTimeout:  cfg.WriteTimeout,
-		})
+		}
+		if cfg.Protocol >= 2 {
+			opt.Protocol = cfg.Protocol
+		}
+		rc = redis.NewFailoverClient(opt)
 	default:
-		rc = redis.NewClient(&redis.Options{
+		opt := &redis.Options{
 			Addr:         cfg.Addrs[0],
 			Username:     cfg.Username,
 			Password:     cfg.Password,
@@ -158,7 +192,22 @@ func NewClient(cfg Config) (*Client, error) {
 			DialTimeout:  cfg.DialTimeout,
 			ReadTimeout:  cfg.ReadTimeout,
 			WriteTimeout: cfg.WriteTimeout,
-		})
+		}
+		if cfg.Protocol >= 2 {
+			opt.Protocol = cfg.Protocol
+		}
+		if cfg.ClientSideCaching != nil {
+			if opt.Protocol == 0 {
+				opt.Protocol = 3
+			}
+			opt.ClientSideCacheConfig = &redis.ClientSideCacheConfig{
+				MaxEntries:     cfg.ClientSideCaching.MaxEntries,
+				MaxMemoryBytes: cfg.ClientSideCaching.MaxMemoryBytes,
+				DrainInterval:  cfg.ClientSideCaching.DrainInterval,
+				MaxStaleness:   cfg.ClientSideCaching.MaxStaleness,
+			}
+		}
+		rc = redis.NewClient(opt)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.DialTimeout)
@@ -198,6 +247,16 @@ func (c *Client) Redis() redis.UniversalClient { return c.rc }
 // ID returns this client's random id (hex string).
 func (c *Client) ID() string { return c.id }
 
+// HolderID builds a Redisson-shaped lock HASH field "{clientUUID}:{threadID}".
+// Use the same threadID for Lock/Unlock/re-entry on one logical holder.
+// An empty threadID becomes "0".
+func (c *Client) HolderID(threadID string) string {
+	if threadID == "" {
+		threadID = "0"
+	}
+	return c.id + ":" + threadID
+}
+
 func (c *Client) logf(format string, v ...any) {
 	c.cfg.Logger.Printf("redi: "+format, v...)
 }
@@ -207,6 +266,14 @@ func (c *Client) GetRLock(name string) *RLock { return newRLock(c, name) }
 
 // GetLock is the Redisson-style alias for GetRLock.
 func (c *Client) GetLock(name string) *RLock { return newRLock(c, name) }
+
+// GetFairLock returns a FIFO, re-entrant distributed lock.
+func (c *Client) GetFairLock(name string) *RFairLock { return newRFairLock(c, name) }
+
+// GetNonReentrantFairLock returns a FIFO lock that rejects holder re-entry.
+func (c *Client) GetNonReentrantFairLock(name string) *RNonReentrantFairLock {
+	return newRNonReentrantFairLock(c, name)
+}
 
 // GetReadWriteLock returns a distributed read-write lock for the given name.
 func (c *Client) GetReadWriteLock(name string) *RReadWriteLock {
@@ -221,6 +288,11 @@ func (c *Client) GetMap(name string) *RMap { return newRMap(c, name) }
 
 // GetMapCache returns a distributed map with per-entry TTL/maxIdle.
 func (c *Client) GetMapCache(name string) *RMapCache { return newRMapCache(c, name) }
+
+// GetMapCacheNative returns a map with per-entry TTL via Redis HPEXPIRE (Redis ≥7.4).
+func (c *Client) GetMapCacheNative(name string) *RMapCacheNative {
+	return newRMapCacheNative(c, name)
+}
 
 // GetRList returns a distributed list (Redis List) for the given name.
 func (c *Client) GetRList(name string) *RList { return newRList(c, name) }
@@ -243,6 +315,11 @@ func (c *Client) GetQueue(name string) *RQueue { return newRQueue(c, name) }
 // GetBlockingQueue returns a queue with blocking consumption.
 func (c *Client) GetBlockingQueue(name string) *RBlockingQueue {
 	return newRBlockingQueue(c, name)
+}
+
+// GetBoundedBlockingQueue returns a capacity-bounded blocking queue.
+func (c *Client) GetBoundedBlockingQueue(name string) *RBoundedBlockingQueue {
+	return newRBoundedBlockingQueue(c, name)
 }
 
 // GetBlockingDeque returns a deque with blocking consumption from both ends.
@@ -301,9 +378,56 @@ func (c *Client) GetLocalCachedMap(name string) *RLocalCachedMap {
 }
 
 // GetPriorityQueue returns a ZSET-backed priority queue (lower score =
-// higher priority).
+// higher priority). Not Java Comparator RPriorityQueue — see COMPATIBILITY.
 func (c *Client) GetPriorityQueue(name string) *RPriorityQueue {
 	return newRPriorityQueue(c, name)
+}
+
+// GetPriorityBlockingQueue returns a BZPOPMIN wrapper over GetPriorityQueue.
+// Not Java Comparator RPriorityBlockingQueue.
+func (c *Client) GetPriorityBlockingQueue(name string) *RPriorityBlockingQueue {
+	return newRPriorityBlockingQueue(c, name)
+}
+
+// GetPriorityBlockingDeque returns a BZPOPMIN/BZPOPMAX wrapper over the ZSET
+// priority queue. Not Java Comparator RPriorityBlockingDeque.
+func (c *Client) GetPriorityBlockingDeque(name string) *RPriorityBlockingDeque {
+	return newRPriorityBlockingDeque(c, name)
+}
+
+// GetPriorityDeque returns non-blocking double-ended ZSET pops.
+// Not Java Comparator RPriorityDeque.
+func (c *Client) GetPriorityDeque(name string) *RPriorityDeque {
+	return newRPriorityDeque(c, name)
+}
+
+// GetArray returns a Redis 8.8+ ARRAY object (AR* commands).
+func (c *Client) GetArray(name string) *RArray { return newRArray(c, name) }
+
+// GetClientSideCaching returns a facade over this Client.
+// Caching only occurs when Config.ClientSideCaching was set at NewClient, or
+// use GetClientSideCachingWithOptions for a dedicated tracked pool (closer to
+// Redisson getClientSideCaching(options)).
+func (c *Client) GetClientSideCaching() *RClientSideCaching {
+	return newRClientSideCaching(c)
+}
+
+// GetClientSideCachingWithOptions creates a dedicated RESP3 CLIENT TRACKING
+// client (ModeSingle, DB 0) and returns an owned RClientSideCaching.
+// Caller must Destroy() it (or rely on parent Close after registering via
+// t.Cleanup in tests). Nil opts use go-redis defaults.
+func (c *Client) GetClientSideCachingWithOptions(opts *ClientSideCachingOptions) (*RClientSideCaching, error) {
+	child, err := newScopedCSCClient(c, opts)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.DialTimeout)
+	defer cancel()
+	if err := pingCSCReady(ctx, child); err != nil {
+		_ = child.Close()
+		return nil, err
+	}
+	return newOwnedRClientSideCaching(child), nil
 }
 
 // GetLongAdder returns a high-contention distributed counter (local buffer
@@ -323,9 +447,24 @@ func (c *Client) GetFencedLock(name string) *RFencedLock {
 	return newRFencedLock(c, name)
 }
 
+// GetSpinLock returns a re-entrant lock that busy-waits instead of pub/sub.
+func (c *Client) GetSpinLock(name string) *RSpinLock {
+	return newRSpinLock(c, name)
+}
+
+// GetNonReentrantLock returns a lock that refuses re-entry by the same holder.
+func (c *Client) GetNonReentrantLock(name string) *RNonReentrantLock {
+	return newRNonReentrantLock(c, name)
+}
+
 // NewMultiLock groups RLocks into one all-or-nothing lock.
 func (c *Client) NewMultiLock(locks ...*RLock) *RMultiLock {
 	return &RMultiLock{locks: locks}
+}
+
+// NewRedLock groups independent RLocks using RedissonRedLock majority rules.
+func (c *Client) NewRedLock(locks ...*RLock) *RRedLock {
+	return &RRedLock{locks: locks}
 }
 
 // GetTimeSeries returns a time-series store (Redisson wire-compatible).
@@ -353,6 +492,11 @@ func (c *Client) GetScoredSortedSet(name string) *RScoredSortedSet {
 
 // GetBucket returns an object holder (Redis String).
 func (c *Client) GetBucket(name string) *RBucket { return newRBucket(c, name) }
+
+// GetBinaryStream returns a raw-byte stream backed by a Redis String.
+func (c *Client) GetBinaryStream(name string) *RBinaryStream {
+	return newRBinaryStream(c, name)
+}
 
 // GetRAtomicLong returns a distributed atomic counter for the given name.
 func (c *Client) GetRAtomicLong(name string) *RAtomicLong {
@@ -405,10 +549,49 @@ func (c *Client) GetListMultimap(name string) *RListMultimap {
 	return newRListMultimap(c, name)
 }
 
+// GetSetMultimapCache returns a set multimap with per-key expiration.
+func (c *Client) GetSetMultimapCache(name string) *RSetMultimapCache {
+	return newRSetMultimapCache(c, name)
+}
+
+// GetListMultimapCache returns a list multimap with per-key expiration.
+func (c *Client) GetListMultimapCache(name string) *RListMultimapCache {
+	return newRListMultimapCache(c, name)
+}
+
+// GetSetMultimapCacheNative returns a set multimap with native per-key HPEXPIRE.
+func (c *Client) GetSetMultimapCacheNative(name string) *RSetMultimapCacheNative {
+	return newRSetMultimapCacheNative(c, name)
+}
+
+// GetListMultimapCacheNative returns a list multimap with native per-key HPEXPIRE.
+func (c *Client) GetListMultimapCacheNative(name string) *RListMultimapCacheNative {
+	return newRListMultimapCacheNative(c, name)
+}
+
 // GetBloomFilter returns a distributed bloom filter.
 func (c *Client) GetBloomFilter(name string) *RBloomFilter {
 	return newRBloomFilter(c, name)
 }
+
+// GetBloomFilterNative returns a bloom filter backed by Redis BF.* commands.
+func (c *Client) GetBloomFilterNative(name string) *RBloomFilterNative {
+	return newRBloomFilterNative(c, name)
+}
+
+// GetCuckooFilter returns a cuckoo filter backed by Redis CF.* commands.
+func (c *Client) GetCuckooFilter(name string) *RCuckooFilter {
+	return newRCuckooFilter(c, name)
+}
+
+// GetTopK returns a Top-K sketch backed by Redis TOPK.* commands.
+func (c *Client) GetTopK(name string) *RTopK { return newRTopK(c, name) }
+
+// GetTDigest returns a t-digest sketch backed by Redis TDIGEST.* commands.
+func (c *Client) GetTDigest(name string) *RTDigest { return newRTDigest(c, name) }
+
+// GetGcra returns a GCRA rate limiter (Redis GCRA command when available).
+func (c *Client) GetGcra(name string) *RGcra { return newRGcra(c, name) }
 
 // GetIdGenerator returns a distributed id generator.
 func (c *Client) GetIdGenerator(name string) *RIdGenerator {

@@ -47,6 +47,15 @@ redis.call('set', KEYS[1], 0)
 return value
 `)
 
+var semReleaseIfExistsScript = redis.NewScript(`
+if redis.call('exists', KEYS[1]) == 0 then
+    return 0
+end
+local value = redis.call('incrby', KEYS[1], ARGV[1])
+redis.call('publish', KEYS[2], value)
+return 1
+`)
+
 // TrySetPermits initializes the semaphore only when it does not exist.
 func (s *RSemaphore) TrySetPermits(ctx context.Context, permits int64) (bool, error) {
 	return s.rc().SetNX(ctx, s.name, permits, 0).Result()
@@ -59,6 +68,41 @@ func (s *RSemaphore) TryAcquire(ctx context.Context, permits int64) (bool, error
 		return false, err
 	}
 	return n == 1, nil
+}
+
+// TryAcquireWait tries to acquire until wait elapses or ctx is cancelled.
+// Wakes on release via the redisson_sc channel, with a 1s fallback poll.
+func (s *RSemaphore) TryAcquireWait(ctx context.Context, permits int64, wait time.Duration) (bool, error) {
+	if wait <= 0 {
+		return s.TryAcquire(ctx, permits)
+	}
+	ok, err := s.TryAcquire(ctx, permits)
+	if err != nil || ok {
+		return ok, err
+	}
+	deadline := time.Now().Add(wait)
+	sub := s.subscribe(ctx, s.channel)
+	defer sub.Close() //nolint:errcheck // connection teardown
+	wake := sub.Channel()
+	for {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-wake:
+		case <-time.After(minDuration(remain, time.Second)):
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+		ok, err = s.TryAcquire(ctx, permits)
+		if err != nil || ok {
+			return ok, err
+		}
+	}
 }
 
 // Acquire blocks until permits are available or ctx is cancelled.
@@ -92,6 +136,18 @@ func (s *RSemaphore) Acquire(ctx context.Context, permits int64) error {
 func (s *RSemaphore) Release(ctx context.Context, permits int64) error {
 	_, err := semReleaseScript.Run(ctx, s.rc(), []string{s.name, s.channel}, permits).Int()
 	return err
+}
+
+// ReleaseIfExists returns permits only when the semaphore is initialized.
+func (s *RSemaphore) ReleaseIfExists(
+	ctx context.Context, permits int64,
+) (bool, error) {
+	if permits <= 0 {
+		return false, nil
+	}
+	n, err := semReleaseIfExistsScript.Run(ctx, s.rc(),
+		[]string{s.name, s.channel}, permits).Int()
+	return n == 1, err
 }
 
 // AvailablePermits returns the current permit count (0 when uninitialized).
