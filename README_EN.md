@@ -4,7 +4,7 @@
 
 A Pure Go Redis client library that mirrors Redisson, targeting **Redis 8.x**.
 **Wire format (key layout / Lua algorithms / value encoding) aligns with Java Redisson (JsonJacksonCodec) and [redi.py](https://github.com/linkerlin/redi.py) for interoperability** — see [COMPATIBILITY.md](COMPATIBILITY.md).
-It has passed **Go ↔ real Redisson 4.6.1 bidirectional interop tests** (39 `TestJavaInterop_*` test functions) and Go ↔ redi.py bidirectional regression (including Multimap). `Client.Get*` factories currently cover **66 unique R\* return types**. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+It has passed **Go ↔ real Redisson 4.6.1 bidirectional interop tests** (48 `TestJavaInterop_*` test functions) and Go ↔ redi.py bidirectional regression (including Multimap). `Client.Get*` factories currently cover **66 unique R\* return types**. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## Features
 

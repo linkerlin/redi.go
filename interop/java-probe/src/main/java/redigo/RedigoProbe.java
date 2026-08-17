@@ -8,20 +8,28 @@ import org.redisson.api.RBinaryStream;
 import org.redisson.api.RBloomFilter;
 import org.redisson.api.RBoundedBlockingQueue;
 import org.redisson.api.RBucket;
+import org.redisson.api.RBuckets;
 import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RCountDownLatch;
 import org.redisson.api.RDelayedQueue;
+import org.redisson.api.RDoubleAdder;
+import org.redisson.api.RKeys;
 import org.redisson.api.RLexSortedSet;
 import org.redisson.api.RList;
+import org.redisson.api.RListMultimap;
 import org.redisson.api.RLock;
 import org.redisson.api.RMap;
 import org.redisson.api.RMapCache;
 import org.redisson.api.RMapCacheNative;
+import org.redisson.api.RQueue;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RReadWriteLock;
 import org.redisson.api.RRingBuffer;
 import org.redisson.api.RScoredSortedSet;
+import org.redisson.api.RScript;
 import org.redisson.api.RSemaphore;
+import org.redisson.api.RSet;
+import org.redisson.api.RSetMultimap;
 import org.redisson.api.RSetMultimapCacheNative;
 import org.redisson.api.RListMultimapCacheNative;
 import org.redisson.api.RSetMultimapCache;
@@ -32,6 +40,7 @@ import org.redisson.api.FunctionResult;
 import org.redisson.api.RFunction;
 import org.redisson.api.RIdGenerator;
 import org.redisson.api.RShardedTopic;
+import org.redisson.api.RTopic;
 import org.redisson.api.RateIntervalUnit;
 import org.redisson.api.RateType;
 import org.redisson.api.RedissonClient;
@@ -66,11 +75,15 @@ public final class RedigoProbe {
     private static org.redisson.api.RFencedLock heldFenced;
     private static String heldPermit;
     private static org.redisson.api.RLongAdder heldAdder;
+    private static RDoubleAdder heldDoubleAdder;
     private static final java.util.concurrent.BlockingQueue<
             java.util.concurrent.BlockingQueue<Object>> reliableMsgs =
             new java.util.concurrent.LinkedBlockingQueue<>();
     private static final java.util.concurrent.BlockingQueue<
             java.util.concurrent.BlockingQueue<Object>> shardedMsgs =
+            new java.util.concurrent.LinkedBlockingQueue<>();
+    private static final java.util.concurrent.BlockingQueue<
+            java.util.concurrent.BlockingQueue<Object>> topicMsgs =
             new java.util.concurrent.LinkedBlockingQueue<>();
 
     public static void main(String[] args) throws Exception {
@@ -720,6 +733,135 @@ public final class RedigoProbe {
                 } else {
                     Object m = q.poll(4, TimeUnit.SECONDS);
                     reply(map("value", m));
+                }
+            }
+
+            case "topic_listen" -> {
+                RTopic topic = rs.getTopic(a[1]);
+                java.util.concurrent.BlockingQueue<Object> q =
+                        new java.util.concurrent.LinkedBlockingQueue<>();
+                topic.addListener(Object.class,
+                        (org.redisson.api.listener.MessageListener<Object>) (channel, msg) -> q.add(msg));
+                topicMsgs.offer(q);
+                reply(map("ok", true));
+            }
+            case "topic_publish" -> {
+                RTopic topic = rs.getTopic(a[1]);
+                reply(map("subscribers", topic.publish(OM.readValue(a[2], Object.class))));
+            }
+            case "topic_collect" -> {
+                java.util.concurrent.BlockingQueue<Object> q = topicMsgs.poll();
+                if (q == null) {
+                    reply(map("value", null));
+                } else {
+                    Object m = q.poll(4, TimeUnit.SECONDS);
+                    reply(map("value", m));
+                }
+            }
+
+            case "script_eval" -> {
+                RScript script = rs.getScript();
+                String lua = new String(Base64.getDecoder().decode(a[1]));
+                Object r = script.eval(RScript.Mode.READ_ONLY, lua, RScript.ReturnType.LONG);
+                reply(map("value", r));
+            }
+            case "script_load" -> {
+                RScript script = rs.getScript();
+                String lua = new String(Base64.getDecoder().decode(a[1]));
+                reply(map("sha", script.scriptLoad(lua)));
+            }
+
+            case "buckets_set" -> {
+                RBuckets buckets = rs.getBuckets();
+                Map<String, Object> mapping = new HashMap<>();
+                for (int i = 1; i + 1 < a.length; i += 2) {
+                    mapping.put(a[i], OM.readValue(a[i + 1], Object.class));
+                }
+                buckets.set(mapping);
+                reply(map("ok", true));
+            }
+            case "buckets_get" -> {
+                RBuckets buckets = rs.getBuckets();
+                String[] keys = java.util.Arrays.copyOfRange(a, 1, a.length);
+                reply(map("values", buckets.get(keys)));
+            }
+
+            case "keys_type" -> {
+                RKeys keys = rs.getKeys();
+                reply(map("type", keys.getType(a[1]).toString()));
+            }
+            case "keys_count_exists" -> {
+                RKeys keys = rs.getKeys();
+                String[] names = java.util.Arrays.copyOfRange(a, 1, a.length);
+                reply(map("count", keys.countExists(names)));
+            }
+            case "keys_delete" -> {
+                RKeys keys = rs.getKeys();
+                String[] names = java.util.Arrays.copyOfRange(a, 1, a.length);
+                reply(map("deleted", keys.delete(names)));
+            }
+
+            case "set_add" -> {
+                RSet<Object> set = rs.getSet(a[1]);
+                reply(map("added", set.add(OM.readValue(a[2], Object.class))));
+            }
+            case "set_contains" -> {
+                RSet<Object> set = rs.getSet(a[1]);
+                reply(map("contains", set.contains(OM.readValue(a[2], Object.class))));
+            }
+            case "set_size" -> {
+                RSet<Object> set = rs.getSet(a[1]);
+                reply(map("size", set.size()));
+            }
+
+            case "queue_offer" -> {
+                RQueue<Object> q = rs.getQueue(a[1]);
+                reply(map("ok", q.offer(OM.readValue(a[2], Object.class))));
+            }
+            case "queue_poll" -> {
+                RQueue<Object> q = rs.getQueue(a[1]);
+                reply(map("value", q.poll()));
+            }
+            case "queue_size" -> {
+                RQueue<Object> q = rs.getQueue(a[1]);
+                reply(map("size", q.size()));
+            }
+
+            case "smm_put" -> {
+                RSetMultimap<Object, Object> m = rs.getSetMultimap(a[1]);
+                reply(map("added", m.put(OM.readValue(a[2], Object.class),
+                        OM.readValue(a[3], Object.class))));
+            }
+            case "smm_getall" -> {
+                RSetMultimap<Object, Object> m = rs.getSetMultimap(a[1]);
+                reply(map("values", new ArrayList<>(m.getAll(OM.readValue(a[2], Object.class)))));
+            }
+
+            case "lmm_put" -> {
+                RListMultimap<Object, Object> m = rs.getListMultimap(a[1]);
+                reply(map("added", m.put(OM.readValue(a[2], Object.class),
+                        OM.readValue(a[3], Object.class))));
+            }
+            case "lmm_getall" -> {
+                RListMultimap<Object, Object> m = rs.getListMultimap(a[1]);
+                reply(map("values", new ArrayList<>(m.getAll(OM.readValue(a[2], Object.class)))));
+            }
+
+            case "dadder_create" -> {
+                heldDoubleAdder = rs.getDoubleAdder(a[1]);
+                reply(map("ok", true));
+            }
+            case "dadder_add" -> {
+                if (heldDoubleAdder != null) {
+                    heldDoubleAdder.add(Double.parseDouble(a[2]));
+                }
+                reply(map("ok", true));
+            }
+            case "dadder_sum" -> {
+                if (heldDoubleAdder == null) {
+                    reply(map("error", "no double adder"));
+                } else {
+                    reply(map("value", heldDoubleAdder.sum()));
                 }
             }
 

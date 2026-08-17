@@ -3,6 +3,8 @@ package redi_test
 import (
 	"testing"
 	"time"
+
+	redi "github.com/linkerlin/redi.go"
 )
 
 func TestE2E_KeysObjectBatch_Coverage(t *testing.T) {
@@ -141,5 +143,53 @@ func TestE2E_ClientOpsAndMultiLockAlias(t *testing.T) {
 	}
 	if err := ml.Unlock(testCtx, holder); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestE2E_PhaseK_BucketsScriptMultimap(t *testing.T) {
+	client := newTestClient(t)
+
+	a := uniqueKey(t, "pk-bkt-a")
+	b := uniqueKey(t, "pk-bkt-b")
+	t.Cleanup(func() { interopCleanup(t, a, b) })
+	buckets := client.GetBuckets()
+	if err := buckets.Set(testCtx, map[string]any{a: "1", b: "2"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buckets.Get(testCtx, a, b)
+	if err != nil || got[a] != "1" || got[b] != "2" {
+		t.Fatalf("Buckets Get = %v, %v", got, err)
+	}
+
+	s := client.GetScript()
+	v, err := s.Eval(testCtx, "return 7", redi.ScriptReturnInteger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := v.(int64); !ok || n != 7 {
+		t.Fatalf("Script Eval = %#v", v)
+	}
+
+	smm := client.GetSetMultimap(uniqueKey(t, "pk-smm"))
+	t.Cleanup(func() { interopCleanupPattern(t, "*"+smm.Name()+"*") })
+	if _, err := smm.Put(testCtx, "k", "v"); err != nil {
+		t.Fatal(err)
+	}
+	vals, err := smm.Get(testCtx, "k")
+	if err != nil || len(vals) != 1 || vals[0] != "v" {
+		t.Fatalf("SetMultimap Get = %v, %v", vals, err)
+	}
+
+	lmm := client.GetListMultimap(uniqueKey(t, "pk-lmm"))
+	t.Cleanup(func() { interopCleanupPattern(t, "*"+lmm.Name()+"*") })
+	if _, err := lmm.Put(testCtx, "k", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lmm.Put(testCtx, "k", "b"); err != nil {
+		t.Fatal(err)
+	}
+	lvals, err := lmm.Get(testCtx, "k")
+	if err != nil || len(lvals) != 2 {
+		t.Fatalf("ListMultimap Get = %v, %v", lvals, err)
 	}
 }

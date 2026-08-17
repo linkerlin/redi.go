@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **阶段 K（演进收官）**：Topic / Script / Buckets / Keys / Set / Queue / Set·List Multimap / DoubleAdder Java 双向互操作；e2e 补 Buckets/Script/Multimap；五语 README 与 COMPATIBILITY 校准为 **48** 个 `TestJavaInterop_*`；演进方案终章——对齐演进在不做清单内已完成，后续仅维护/按需方法级补齐
 - **阶段 J**：IdGenerator / Function / ShardedTopic Java 双向互操作
 - **阶段 I**：SetCache 与 Set/List MultimapCache Java 双向互操作
 - **阶段 H**：Set/List MultimapCacheNative 与 RingBuffer Java 双向互操作

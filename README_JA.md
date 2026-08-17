@@ -4,7 +4,7 @@
 
 Redisson を Pure Go で再現した Redis クライアントライブラリです。対象は **Redis 8.x**。
 **Wire 形式（キー配置 / Lua アルゴリズム / 値エンコード）は Java Redisson（JsonJacksonCodec）および [redi.py](https://github.com/linkerlin/redi.py) と揃え、相互運用可能です** — 詳細は [COMPATIBILITY.md](COMPATIBILITY.md)。
-**Go ↔ 実 Redisson 4.6.1 の双方向相互運用テスト**（39 個の `TestJavaInterop_*`）および Go ↔ redi.py 双方向回帰（Multimap 含む）を通過済みです。`Client.Get*` ファクトリは現在 **66 種のユニークな R\* 戻り値型**をカバーします。貢献方法は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+**Go ↔ 実 Redisson 4.6.1 の双方向相互運用テスト**（48 個の `TestJavaInterop_*`）および Go ↔ redi.py 双方向回帰（Multimap 含む）を通過済みです。`Client.Get*` ファクトリは現在 **66 種のユニークな R\* 戻り値型**をカバーします。貢献方法は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ## 機能
 
