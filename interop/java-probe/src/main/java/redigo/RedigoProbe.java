@@ -27,6 +27,11 @@ import org.redisson.api.RListMultimapCacheNative;
 import org.redisson.api.RSetMultimapCache;
 import org.redisson.api.RListMultimapCache;
 import org.redisson.api.RSetCache;
+import org.redisson.api.FunctionMode;
+import org.redisson.api.FunctionResult;
+import org.redisson.api.RFunction;
+import org.redisson.api.RIdGenerator;
+import org.redisson.api.RShardedTopic;
 import org.redisson.api.RateIntervalUnit;
 import org.redisson.api.RateType;
 import org.redisson.api.RedissonClient;
@@ -63,6 +68,9 @@ public final class RedigoProbe {
     private static org.redisson.api.RLongAdder heldAdder;
     private static final java.util.concurrent.BlockingQueue<
             java.util.concurrent.BlockingQueue<Object>> reliableMsgs =
+            new java.util.concurrent.LinkedBlockingQueue<>();
+    private static final java.util.concurrent.BlockingQueue<
+            java.util.concurrent.BlockingQueue<Object>> shardedMsgs =
             new java.util.concurrent.LinkedBlockingQueue<>();
 
     public static void main(String[] args) throws Exception {
@@ -663,6 +671,56 @@ public final class RedigoProbe {
             case "lmmc_getall" -> {
                 RListMultimapCache<Object, Object> m = rs.getListMultimapCache(a[1]);
                 reply(map("values", new ArrayList<>(m.getAll(OM.readValue(a[2], Object.class)))));
+            }
+
+            case "idgen_init" -> {
+                RIdGenerator g = rs.getIdGenerator(a[1]);
+                reply(map("ok", g.tryInit(Long.parseLong(a[2]), Long.parseLong(a[3]))));
+            }
+            case "idgen_next" -> {
+                RIdGenerator g = rs.getIdGenerator(a[1]);
+                reply(map("id", g.nextId()));
+            }
+
+            case "func_load" -> {
+                RFunction fn = rs.getFunction();
+                String lib = a[1];
+                String code = new String(Base64.getDecoder().decode(a[2]));
+                fn.loadAndReplace(lib, code);
+                reply(map("ok", true));
+            }
+            case "func_call" -> {
+                RFunction fn = rs.getFunction();
+                Object r = fn.call(FunctionMode.READ, a[1], FunctionResult.LONG,
+                        java.util.Collections.emptyList(), Long.parseLong(a[2]));
+                reply(map("value", r));
+            }
+            case "func_delete" -> {
+                rs.getFunction().delete(a[1]);
+                reply(map("ok", true));
+            }
+
+            case "stopic_listen" -> {
+                RShardedTopic topic = rs.getShardedTopic(a[1]);
+                java.util.concurrent.BlockingQueue<Object> q =
+                        new java.util.concurrent.LinkedBlockingQueue<>();
+                topic.addListener(Object.class,
+                        (org.redisson.api.listener.MessageListener<Object>) (channel, msg) -> q.add(msg));
+                shardedMsgs.offer(q);
+                reply(map("ok", true));
+            }
+            case "stopic_publish" -> {
+                RShardedTopic topic = rs.getShardedTopic(a[1]);
+                reply(map("subscribers", topic.publish(OM.readValue(a[2], Object.class))));
+            }
+            case "stopic_collect" -> {
+                java.util.concurrent.BlockingQueue<Object> q = shardedMsgs.poll();
+                if (q == null) {
+                    reply(map("value", null));
+                } else {
+                    Object m = q.poll(4, TimeUnit.SECONDS);
+                    reply(map("value", m));
+                }
             }
 
             case "bbq_capacity" -> {

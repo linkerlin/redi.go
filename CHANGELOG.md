@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **阶段 J**：IdGenerator / Function / ShardedTopic Java 双向互操作
 - **阶段 I**：SetCache 与 Set/List MultimapCache Java 双向互操作
 - **阶段 H**：Set/List MultimapCacheNative 与 RingBuffer Java 双向互操作
 - **阶段 G**：NonReentrantFairLock / MapCacheNative Java 双向互操作；`GetMultiLock` 别名；演进方案阶段表续写

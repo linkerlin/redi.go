@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **36 个 `TestJavaInterop_*` 测试函数**（含 SetCache / MultimapCache(+Native) / RingBuffer）；CI 有独立 `java-interop` job**。
+> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **39 个 `TestJavaInterop_*` 测试函数**（含 IdGenerator / Function / ShardedTopic / SetCache / MultimapCache）；CI 有独立 `java-interop` job**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -105,9 +105,9 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 | getDelayedQueue / getAtomic* / getLongAdder / getDoubleAdder | WIRE_OK | |
 | getBloomFilter / getBloomFilterNative / getCuckooFilter / getTopK / getTDigest / getGcra | WIRE_OK / NATIVE_OK | |
 | getRateLimiter / getSemaphore / getPermitExpirableSemaphore / getCountDownLatch | WIRE_OK | keepAlive 见 RateLimiter API |
-| getTopic / getPatternTopic / getShardedTopic / getReliableTopic | WIRE_OK / NATIVE_OK | |
+| getTopic / getPatternTopic / getShardedTopic / getReliableTopic | WIRE_OK / NATIVE_OK | ShardedTopic Java 双向实测 ✅ |
 | getStream / getGeo / getHyperLogLog / getBitSet / getTimeSeries / getRingBuffer | WIRE_OK / NATIVE_OK | RingBuffer Java 双向实测 ✅ |
-| getIdGenerator / getKeys / getBuckets / getScript / createBatch / getFunction | WIRE_OK / NATIVE_OK | |
+| getIdGenerator / getKeys / getBuckets / getScript / createBatch / getFunction | WIRE_OK / NATIVE_OK | IdGenerator / Function Java 双向实测 ✅ |
 | getLocalCachedMap | PARTIAL | 数据层 WIRE_OK；失效为 Go JSON（可用 Options 关近端） |
 | getClientSideCaching | PARTIAL | go-redis TRACKING；非 Java EvictionPolicy |
 | getArray | NATIVE_OK | Redis 8.8+；命令缺失 skip |
