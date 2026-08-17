@@ -1,6 +1,6 @@
 # redi.go
 
-[中文](README.md) | **English**
+[中文](README.md) | **English** | [Français](README_FR.md) | [日本語](README_JA.md) | [한국어](README_KO.md)
 
 A Pure Go Redis client library that mirrors Redisson, targeting **Redis 8.x**.
 **Wire format (key layout / Lua algorithms / value encoding) aligns with Java Redisson (JsonJacksonCodec) and [redi.py](https://github.com/linkerlin/redi.py) for interoperability** — see [COMPATIBILITY.md](COMPATIBILITY.md).

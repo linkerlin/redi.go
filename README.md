@@ -1,6 +1,6 @@
 # redi.go
 
-**中文** | [English](README_EN.md)
+**中文** | [English](README_EN.md) | [Français](README_FR.md) | [日本語](README_JA.md) | [한국어](README_KO.md)
 
 一个用 Pure Go 复刻 Redisson 的 Redis 客户端库，面向 **Redis 8.x**。
 **Wire format（key 布局 / Lua 算法 / 值编码）与 Java Redisson（JsonJacksonCodec 配置）及 [redi.py](https://github.com/linkerlin/redi.py) 对齐，可互操作**——详见 [COMPATIBILITY.md](COMPATIBILITY.md)。
