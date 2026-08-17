@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **33 个 `TestJavaInterop_*` 测试函数**（含 Native Multimap / RingBuffer / MapCacheNative / NonReentrant*）；CI 有独立 `java-interop` job**。
+> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **36 个 `TestJavaInterop_*` 测试函数**（含 SetCache / MultimapCache(+Native) / RingBuffer）；CI 有独立 `java-interop` job**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -100,7 +100,7 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 | getMultiLock / getRedLock | WIRE_OK | 客户端编排；Go `GetMultiLock`/`NewMultiLock` |
 | getMap / getList / getSet / getQueue / getDeque / getBlocking* / getBoundedBlockingQueue | WIRE_OK | |
 | getMapCache / getMapCacheNative | WIRE_OK / NATIVE_OK | Native 需 Redis≥7.4；MapCacheNative Java 双向实测 ✅ |
-| getSetCache / get*Multimap / get*MultimapCache / get*MultimapCacheNative | WIRE_OK / NATIVE_OK | MultimapCacheNative Java 双向实测 ✅ |
+| getSetCache / get*Multimap / get*MultimapCache / get*MultimapCacheNative | WIRE_OK / NATIVE_OK | SetCache / MultimapCache(+Native) Java 双向实测 ✅ |
 | getScoredSortedSet / getLexSortedSet / getBucket / getBinaryStream | WIRE_OK | |
 | getDelayedQueue / getAtomic* / getLongAdder / getDoubleAdder | WIRE_OK | |
 | getBloomFilter / getBloomFilterNative / getCuckooFilter / getTopK / getTDigest / getGcra | WIRE_OK / NATIVE_OK | |

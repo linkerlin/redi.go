@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **阶段 I**：SetCache 与 Set/List MultimapCache Java 双向互操作
 - **阶段 H**：Set/List MultimapCacheNative 与 RingBuffer Java 双向互操作
 - **阶段 G**：NonReentrantFairLock / MapCacheNative Java 双向互操作；`GetMultiLock` 别名；演进方案阶段表续写
 - **多语言 README**：新增 [Français](README_FR.md) / [日本語](README_JA.md) / [한국어](README_KO.md)；中英及各语种顶部互链

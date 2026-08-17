@@ -4,7 +4,7 @@
 
 Bibliothèque cliente Redis en Pure Go calquée sur Redisson, ciblant **Redis 8.x**.
 **Le format wire (disposition des clés / algorithmes Lua / encodage des valeurs) s’aligne sur Java Redisson (JsonJacksonCodec) et [redi.py](https://github.com/linkerlin/redi.py) pour l’interopérabilité** — voir [COMPATIBILITY.md](COMPATIBILITY.md).
-Elle a passé les **tests d’interopérabilité bidirectionnelle Go ↔ Redisson 4.6.1 réel** (33 fonctions `TestJavaInterop_*`) et la régression bidirectionnelle Go ↔ redi.py (dont Multimap). Les usines `Client.Get*` couvrent actuellement **66 types de retour R\* uniques**. Voir [CONTRIBUTING.md](CONTRIBUTING.md) pour contribuer.
+Elle a passé les **tests d’interopérabilité bidirectionnelle Go ↔ Redisson 4.6.1 réel** (36 fonctions `TestJavaInterop_*`) et la régression bidirectionnelle Go ↔ redi.py (dont Multimap). Les usines `Client.Get*` couvrent actuellement **66 types de retour R\* uniques**. Voir [CONTRIBUTING.md](CONTRIBUTING.md) pour contribuer.
 
 ## Fonctionnalités
 
