@@ -6,12 +6,14 @@ import org.redisson.api.RAtomicDouble;
 import org.redisson.api.RAtomicLong;
 import org.redisson.api.RBinaryStream;
 import org.redisson.api.RBloomFilter;
+import org.redisson.api.RBlockingDeque;
 import org.redisson.api.RBoundedBlockingQueue;
 import org.redisson.api.RBucket;
 import org.redisson.api.RBuckets;
 import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RCountDownLatch;
 import org.redisson.api.RDelayedQueue;
+import org.redisson.api.RDeque;
 import org.redisson.api.RDoubleAdder;
 import org.redisson.api.RKeys;
 import org.redisson.api.RLexSortedSet;
@@ -21,6 +23,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RMap;
 import org.redisson.api.RMapCache;
 import org.redisson.api.RMapCacheNative;
+import org.redisson.api.RPatternTopic;
 import org.redisson.api.RQueue;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RReadWriteLock;
@@ -84,6 +87,9 @@ public final class RedigoProbe {
             new java.util.concurrent.LinkedBlockingQueue<>();
     private static final java.util.concurrent.BlockingQueue<
             java.util.concurrent.BlockingQueue<Object>> topicMsgs =
+            new java.util.concurrent.LinkedBlockingQueue<>();
+    private static final java.util.concurrent.BlockingQueue<
+            java.util.concurrent.BlockingQueue<Object>> patternMsgs =
             new java.util.concurrent.LinkedBlockingQueue<>();
 
     public static void main(String[] args) throws Exception {
@@ -757,6 +763,57 @@ public final class RedigoProbe {
                     Object m = q.poll(4, TimeUnit.SECONDS);
                     reply(map("value", m));
                 }
+            }
+
+            case "ptopic_listen" -> {
+                RPatternTopic topic = rs.getPatternTopic(a[1]);
+                java.util.concurrent.BlockingQueue<Object> q =
+                        new java.util.concurrent.LinkedBlockingQueue<>();
+                topic.addListener(Object.class, (pattern, channel, msg) -> q.add(msg));
+                patternMsgs.offer(q);
+                reply(map("ok", true));
+            }
+            case "ptopic_collect" -> {
+                java.util.concurrent.BlockingQueue<Object> q = patternMsgs.poll();
+                if (q == null) {
+                    reply(map("value", null));
+                } else {
+                    Object m = q.poll(4, TimeUnit.SECONDS);
+                    reply(map("value", m));
+                }
+            }
+
+            case "deque_add_first" -> {
+                RDeque<Object> d = rs.getDeque(a[1]);
+                d.addFirst(OM.readValue(a[2], Object.class));
+                reply(map("ok", true));
+            }
+            case "deque_add_last" -> {
+                RDeque<Object> d = rs.getDeque(a[1]);
+                d.addLast(OM.readValue(a[2], Object.class));
+                reply(map("ok", true));
+            }
+            case "deque_remove_first" -> {
+                RDeque<Object> d = rs.getDeque(a[1]);
+                reply(map("value", d.pollFirst()));
+            }
+            case "deque_remove_last" -> {
+                RDeque<Object> d = rs.getDeque(a[1]);
+                reply(map("value", d.pollLast()));
+            }
+            case "deque_size" -> {
+                RDeque<Object> d = rs.getDeque(a[1]);
+                reply(map("size", d.size()));
+            }
+
+            case "bdq_put_last" -> {
+                RBlockingDeque<Object> d = rs.getBlockingDeque(a[1]);
+                d.putLast(OM.readValue(a[2], Object.class));
+                reply(map("ok", true));
+            }
+            case "bdq_take_first" -> {
+                RBlockingDeque<Object> d = rs.getBlockingDeque(a[1]);
+                reply(map("value", d.pollFirst()));
             }
 
             case "script_eval" -> {

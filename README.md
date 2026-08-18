@@ -4,7 +4,7 @@
 
 一个用 Pure Go 复刻 Redisson 的 Redis 客户端库，面向 **Redis 8.x**。
 **Wire format（key 布局 / Lua 算法 / 值编码）与 Java Redisson（JsonJacksonCodec 配置）及 [redi.py](https://github.com/linkerlin/redi.py) 对齐，可互操作**——详见 [COMPATIBILITY.md](COMPATIBILITY.md)。
-已通过 **Go ↔ 真实 Redisson 4.6.1 直接双向互操作测试**（48 个 `TestJavaInterop_*` 测试函数）与 Go ↔ redi.py 双向回归（含 Multimap 等）。`Client.Get*` 工厂当前覆盖 **66 种唯一 R* 返回类型**。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+已通过 **Go ↔ 真实 Redisson 4.6.1 直接双向互操作测试**（51 个 `TestJavaInterop_*` 测试函数）与 Go ↔ redi.py 双向回归（含 Multimap 等）。`Client.Get*` 工厂当前覆盖 **66 种唯一 R* 返回类型**。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 特性
 
