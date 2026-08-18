@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.2.13 (2026-08-19) — 演进收官
+
+OSS 对齐阶段 0–K 在不做清单内收口。Java 互操作 **24 → 56** 组；修复 IdGenerator 交错发号；后续仅维护与按需方法级补齐。
+
 - **维护 Java 互操作（锁编排）**：MultiLock 全员互斥、RedLock 多数派交叉持锁；`TestJavaInterop_*` **54 → 56**
 - **维护 Java 互操作（续）**：BlockingQueue / Batch 双向探针；Maps 为 Go Set → Java RMap 读（4.6.1 无 `getMaps`）；`TestJavaInterop_*` **51 → 54**
 - **维护 Java 互操作**：Deque / BlockingDeque / PatternTopic 双向探针；`TestJavaInterop_*` **48 → 51**；校准 NonReentrantFairLock / PatternTopic / BlockingDeque 文档状态
