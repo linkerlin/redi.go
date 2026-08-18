@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **51 个 `TestJavaInterop_*` 测试函数**（含 Topic / PatternTopic / Script / Buckets / Keys / Set / Queue / Deque / BlockingDeque / Multimap / DoubleAdder 等）；CI 有独立 `java-interop` job**。
+> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **54 个 `TestJavaInterop_*` 测试函数**（含 Topic / PatternTopic / Script / Buckets / Keys / Set / Queue / Deque / BlockingQueue / BlockingDeque / Batch / Maps / Multimap / DoubleAdder 等）；CI 有独立 `java-interop` job**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -75,7 +75,7 @@
 | RKeys | DBSIZE/SCAN 迭代/模式删除（Del/Unlink）/Copy/Type/FlushDB | 单元测试 ✅ |
 | RBuckets | MGET/MSET/MSETNX + 批量 TTL（pipeline） | 单元测试 ✅ |
 | RScript | EVAL/EVALSHA/ScriptLoad/ScriptExists + ReturnType 转换 | 单元测试 ✅ |
-| RBatch | 管道批处理（Map/Bucket/List/Set/Queue/Deque/AtomicLong/AtomicDouble/ScoredSortedSet），实测 ~7x | 单元测试 + 基准 ✅ |
+| RBatch | 管道批处理（Map/Bucket/List/Set/Queue/Deque/AtomicLong/AtomicDouble/ScoredSortedSet），实测 ~7x | 单元测试 + 基准 + **Redisson 4.6.1 createBatch map put 双向实测 ✅** |
 | RTopic / RPatternTopic | 裸名 channel + JSON 消息（PatternTopic 为 PSUBSCRIBE） | **Redisson 4.6.1 Topic/PatternTopic 双向实测 ✅** |
 
 运行双向回归（需本机 Python + `C:/GitHub/redi.py`，缺失自动 skip）：
@@ -98,7 +98,7 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 |------|------|------|
 | getLock / getFairLock / getSpinLock / getNonReentrant* / getFencedLock / getReadWriteLock | WIRE_OK | Spin/NonReentrant/NonReentrantFair Java 双向实测 ✅；RWLock 续期 companion 与 Java 不完全同形，互斥 WIRE_OK |
 | getMultiLock / getRedLock | WIRE_OK | 客户端编排；Go `GetMultiLock`/`NewMultiLock` |
-| getMap / getList / getSet / getQueue / getDeque / getBlocking* / getBoundedBlockingQueue | WIRE_OK | Set / Queue / Deque / BlockingDeque Java 双向实测 ✅ |
+| getMap / getList / getSet / getQueue / getDeque / getBlocking* / getBoundedBlockingQueue | WIRE_OK | Set / Queue / Deque / BlockingQueue / BlockingDeque Java 双向实测 ✅ |
 | getMapCache / getMapCacheNative | WIRE_OK / NATIVE_OK | Native 需 Redis≥7.4；MapCacheNative Java 双向实测 ✅ |
 | getSetCache / get*Multimap / get*MultimapCache / get*MultimapCacheNative | WIRE_OK / NATIVE_OK | Set/List Multimap(+Cache/Native) / SetCache Java 双向实测 ✅ |
 | getScoredSortedSet / getLexSortedSet / getBucket / getBinaryStream | WIRE_OK | |
@@ -107,14 +107,14 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 | getRateLimiter / getSemaphore / getPermitExpirableSemaphore / getCountDownLatch | WIRE_OK | keepAlive 见 RateLimiter API |
 | getTopic / getPatternTopic / getShardedTopic / getReliableTopic | WIRE_OK / NATIVE_OK | Topic / PatternTopic / ShardedTopic / ReliableTopic Java 双向实测 ✅ |
 | getStream / getGeo / getHyperLogLog / getBitSet / getTimeSeries / getRingBuffer | WIRE_OK / NATIVE_OK | RingBuffer Java 双向实测 ✅ |
-| getIdGenerator / getKeys / getBuckets / getScript / createBatch / getFunction | WIRE_OK / NATIVE_OK | IdGenerator / Function / Keys / Buckets / Script Java 双向实测 ✅ |
+| getIdGenerator / getKeys / getBuckets / getScript / createBatch / getFunction | WIRE_OK / NATIVE_OK | IdGenerator / Function / Keys / Buckets / Script / Batch Java 双向实测 ✅ |
 | getLocalCachedMap | PARTIAL | 数据层 WIRE_OK；失效为 Go JSON（可用 Options 关近端） |
 | getClientSideCaching | PARTIAL | go-redis TRACKING；非 Java EvictionPolicy |
 | getArray | NATIVE_OK | Redis 8.8+；命令缺失 skip |
 | getJsonBucket / getJsonBuckets | NATIVE_OK | RedisJSON；命令缺失 skip |
 | getVectorSet | NATIVE_OK | Redis 8+ VSET；命令缺失 skip |
 | getSearch | NATIVE_OK | RediSearch 核心子集；模块缺失 skip |
-| getMaps | NATIVE_OK | 批量 DEL+HSET（HIMPORT 可后续优化） |
+| getMaps | NATIVE_OK | 批量 DEL+HSET（4.6.1 无 `getMaps`；Go Set 的 HASH 可被 Java RMap 读取，整表替换语义实测 ✅） |
 | getCircularBuffer | NATIVE_OK | P-post-4.6.1；ARRAY 环，≠ RingBuffer |
 | getPriority* | GO_ONLY | ZSET+score，非 Comparator |
 | getTransferQueue | GO_ONLY | 队列迁移；别名 `GetQueueTransfer` |

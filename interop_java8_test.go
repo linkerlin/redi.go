@@ -107,3 +107,76 @@ func TestJavaInterop_RPatternTopic(t *testing.T) {
 		t.Fatal("Go did not receive java pattern publish")
 	}
 }
+
+func TestJavaInterop_RBlockingQueue(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	name := uniqueKey(t, "jio-bq")
+	t.Cleanup(func() { interopCleanup(t, name) })
+	q := client.GetBlockingQueue(name)
+
+	if _, err := javaSend("bq_offer " + name + ` "ja"`); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Offer(testCtx, "gb"); err != nil {
+		t.Fatal(err)
+	}
+	v, err := q.Poll(testCtx)
+	if err != nil || v != "ja" {
+		t.Fatalf("Go Poll = %v, %v; want ja", v, err)
+	}
+	if reply, err := javaSend("bq_poll " + name); err != nil || reply["value"] != "gb" {
+		t.Fatalf("java poll = %v, %v; want gb", reply, err)
+	}
+}
+
+func TestJavaInterop_RBatch(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	name := uniqueKey(t, "jio-batch")
+	t.Cleanup(func() { interopCleanup(t, name) })
+
+	mustJava(t, "batch_map_put", name, `"jk"`, `"jv"`)
+	if v, err := client.GetMap(name).Get(testCtx, "jk"); err != nil || v != "jv" {
+		t.Fatalf("Go read after java batch = %v, %v", v, err)
+	}
+
+	b := client.NewBatch()
+	if err := b.GetMap(name).Put(testCtx, "gk", "gv"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Execute(testCtx); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := javaSend("map_get " + name + ` "gk"`); err != nil || reply["value"] != "gv" {
+		t.Fatalf("java read after Go batch = %v, %v", reply, err)
+	}
+}
+
+func TestJavaInterop_RMaps(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	name := uniqueKey(t, "jio-maps")
+	t.Cleanup(func() { interopCleanup(t, name) })
+
+	// Redisson 4.6.1 has no getMaps(); verify Go Set HASH is readable as RMap.
+	if err := client.GetMaps().Set(testCtx, map[string]map[string]any{
+		name: {"k": "from-go", "keep": "yes"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := javaSend("map_get " + name + ` "k"`); err != nil || reply["value"] != "from-go" {
+		t.Fatalf("java read after Go maps.Set = %v, %v", reply, err)
+	}
+	if err := client.GetMaps().Set(testCtx, map[string]map[string]any{
+		name: {"k": "replaced"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := javaSend("map_get " + name + ` "k"`); err != nil || reply["value"] != "replaced" {
+		t.Fatalf("java read after replace = %v, %v", reply, err)
+	}
+	if reply, err := javaSend("map_get " + name + ` "keep"`); err != nil || reply["value"] != nil {
+		t.Fatalf("stale field after maps.Set = %v, %v; want nil", reply, err)
+	}
+}

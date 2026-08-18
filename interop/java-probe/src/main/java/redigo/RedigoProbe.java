@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.redisson.Redisson;
 import org.redisson.api.RAtomicDouble;
 import org.redisson.api.RAtomicLong;
+import org.redisson.api.RBatch;
 import org.redisson.api.RBinaryStream;
 import org.redisson.api.RBloomFilter;
 import org.redisson.api.RBlockingDeque;
@@ -217,6 +218,23 @@ public final class RedigoProbe {
             case "map_get" -> {
                 RMap<Object, Object> m = rs.getMap(a[1]);
                 reply(map("value", m.get(OM.readValue(a[2], Object.class))));
+            }
+
+            case "batch_map_put" -> {
+                RBatch batch = rs.createBatch();
+                batch.getMap(a[1]).putAsync(OM.readValue(a[2], Object.class),
+                        OM.readValue(a[3], Object.class));
+                batch.execute();
+                reply(map("ok", true));
+            }
+
+            case "bq_offer" -> {
+                RBlockingQueue<Object> q = rs.getBlockingQueue(a[1]);
+                reply(map("ok", q.offer(OM.readValue(a[2], Object.class))));
+            }
+            case "bq_poll" -> {
+                RBlockingQueue<Object> q = rs.getBlockingQueue(a[1]);
+                reply(map("value", q.poll()));
             }
 
             case "rw_write_hold" -> {
