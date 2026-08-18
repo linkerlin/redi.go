@@ -203,6 +203,38 @@ func (d *RDeque) encodeAll(values []any) ([]any, error) {
 	return enc, nil
 }
 
+// RemoveFirstOccurrence removes the first matching element (LREM count=1).
+func (d *RDeque) RemoveFirstOccurrence(ctx context.Context, value any) (bool, error) {
+	return d.removeOccurrence(ctx, value, 1)
+}
+
+// RemoveLastOccurrence removes the last matching element (LREM count=-1).
+func (d *RDeque) RemoveLastOccurrence(ctx context.Context, value any) (bool, error) {
+	return d.removeOccurrence(ctx, value, -1)
+}
+
+func (d *RDeque) removeOccurrence(ctx context.Context, value any, count int64) (bool, error) {
+	enc, err := d.c.codec.Encode(value)
+	if err != nil {
+		return false, err
+	}
+	n, err := d.rc().LRem(ctx, d.name, count, enc).Result()
+	return n > 0, err
+}
+
+// Move atomically LMOVEs one element onto dest.
+// from and to are Redis sides: "LEFT" (head) or "RIGHT" (tail).
+func (d *RDeque) Move(ctx context.Context, dest, from, to string) (any, error) {
+	v, err := d.rc().LMove(ctx, d.name, dest, from, to).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return d.c.codec.Decode(v)
+}
+
 // RBlockingQueue is an RQueue with blocking consumption (BLPOP).
 type RBlockingQueue struct {
 	*RQueue
@@ -339,6 +371,26 @@ func (d *RBlockingDeque) PollLastWithTimeout(ctx context.Context, timeout time.D
 		return nil, nil
 	}
 	return d.c.codec.Decode(res[1])
+}
+
+// MoveWithTimeout is BLMOVE onto dest. timeout < 0 returns (nil, nil).
+func (d *RBlockingDeque) MoveWithTimeout(
+	ctx context.Context, dest, from, to string, timeout time.Duration,
+) (any, error) {
+	if timeout < 0 {
+		return nil, nil
+	}
+	secs := secondsAtLeast(timeout)
+	v, err := d.rc().BLMove(
+		ctx, d.name, dest, from, to, time.Duration(secs)*time.Second,
+	).Result()
+	if err == redis.Nil || err == context.DeadlineExceeded {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return d.c.codec.Decode(v)
 }
 
 func blpopDecode(ctx context.Context, c *Client, name string) (any, error) {

@@ -489,6 +489,11 @@ func (c *Client) NewRedLock(locks ...*RLock) *RRedLock {
 	return &RRedLock{locks: locks}
 }
 
+// GetRedLock is the Redisson-style alias for NewRedLock.
+func (c *Client) GetRedLock(locks ...*RLock) *RRedLock {
+	return c.NewRedLock(locks...)
+}
+
 // GetTimeSeries returns a time-series store (Redisson wire-compatible).
 func (c *Client) GetTimeSeries(name string) *RTimeSeries {
 	return newRTimeSeries(c, name)

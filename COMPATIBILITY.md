@@ -97,7 +97,7 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 | 工厂 | 状态 | 备注 |
 |------|------|------|
 | getLock / getFairLock / getSpinLock / getNonReentrant* / getFencedLock / getReadWriteLock | WIRE_OK | Spin/NonReentrant/NonReentrantFair Java 双向实测 ✅；RWLock 续期 companion 与 Java 不完全同形，互斥 WIRE_OK |
-| getMultiLock / getRedLock | WIRE_OK | 客户端编排；**Redisson 4.6.1 交叉持锁/多数派双向实测 ✅** |
+| getMultiLock / getRedLock | WIRE_OK | 客户端编排；**Redisson 4.6.1 交叉持锁/多数派双向实测 ✅**；Go `GetMultiLock` / `GetRedLock` 别名 |
 | getMap / getList / getSet / getQueue / getDeque / getBlocking* / getBoundedBlockingQueue | WIRE_OK | Set / Queue / Deque / BlockingQueue / BlockingDeque Java 双向实测 ✅ |
 | getMapCache / getMapCacheNative | WIRE_OK / NATIVE_OK | Native 需 Redis≥7.4；MapCacheNative Java 双向实测 ✅ |
 | getSetCache / get*Multimap / get*MultimapCache / get*MultimapCacheNative | WIRE_OK / NATIVE_OK | Set/List Multimap(+Cache/Native) / SetCache Java 双向实测 ✅ |

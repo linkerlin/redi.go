@@ -132,6 +132,58 @@ func TestRDeque(t *testing.T) {
 	}
 }
 
+func TestRDeque_OccurrenceAndMove(t *testing.T) {
+	client := newTestClient(t)
+	src := uniqueKey(t, "deque-occ")
+	dst := uniqueKey(t, "deque-move")
+	d := client.GetDeque(src)
+	other := client.GetDeque(dst)
+	t.Cleanup(func() { _ = d.Clear(testCtx); _ = other.Clear(testCtx) })
+
+	_ = d.AddLast(testCtx, "a", "x", "b", "x")
+	ok, err := d.RemoveFirstOccurrence(testCtx, "x")
+	if err != nil || !ok {
+		t.Fatalf("RemoveFirstOccurrence = %v, %v", ok, err)
+	}
+	all, err := d.ReadAll(testCtx)
+	if err != nil || len(all) != 3 || all[0] != "a" || all[1] != "b" || all[2] != "x" {
+		t.Fatalf("after first occurrence = %v, %v", all, err)
+	}
+	ok, err = d.RemoveLastOccurrence(testCtx, "x")
+	if err != nil || !ok {
+		t.Fatalf("RemoveLastOccurrence = %v, %v", ok, err)
+	}
+
+	_ = d.AddLast(testCtx, "tail")
+	moved, err := d.Move(testCtx, dst, "RIGHT", "LEFT")
+	if err != nil || moved != "tail" {
+		t.Fatalf("Move = %v, %v", moved, err)
+	}
+	head, err := other.PeekFirst(testCtx)
+	if err != nil || head != "tail" {
+		t.Fatalf("dest head = %v, %v", head, err)
+	}
+
+	bd := client.GetBlockingDeque(src)
+	_ = bd.AddFirst(testCtx, "blk")
+	moved, err = bd.MoveWithTimeout(testCtx, dst, "LEFT", "RIGHT", time.Second)
+	if err != nil || moved != "blk" {
+		t.Fatalf("MoveWithTimeout = %v, %v", moved, err)
+	}
+}
+
+func TestGetRedLockAlias(t *testing.T) {
+	client := newTestClient(t)
+	n1, n2, n3 := uniqueKey(t, "rl-a"), uniqueKey(t, "rl-b"), uniqueKey(t, "rl-c")
+	t.Cleanup(func() { interopCleanup(t, n1, n2, n3) })
+	rl := client.GetRedLock(client.GetLock(n1), client.GetLock(n2), client.GetLock(n3))
+	ok, err := rl.TryLock(testCtx, client.HolderID("1"), time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("GetRedLock TryLock = %v, %v", ok, err)
+	}
+	_ = rl.Unlock(testCtx, client.HolderID("1"))
+}
+
 func TestRBlockingQueue_Take(t *testing.T) {
 	client := newTestClient(t)
 	q := client.GetBlockingQueue(uniqueKey(t, "bq"))

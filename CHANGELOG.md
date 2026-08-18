@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **RDeque 方法级**：`RemoveFirstOccurrence` / `RemoveLastOccurrence`（LREM）与 `Move`（LMOVE）；`RBlockingDeque.MoveWithTimeout`（BLMOVE）；`Client.GetRedLock` 别名对齐 `getRedLock`
+
 ## v0.2.13 (2026-08-19) — 演进收官
 
 OSS 对齐阶段 0–K 在不做清单内收口。Java 互操作 **24 → 56** 组；修复 IdGenerator 交错发号；后续仅维护与按需方法级补齐。
