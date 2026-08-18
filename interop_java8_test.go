@@ -180,3 +180,90 @@ func TestJavaInterop_RMaps(t *testing.T) {
 		t.Fatalf("stale field after maps.Set = %v, %v; want nil", reply, err)
 	}
 }
+
+func TestJavaInterop_RMultiLock(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	n1, n2 := uniqueKey(t, "jio-ml-1"), uniqueKey(t, "jio-ml-2")
+	t.Cleanup(func() {
+		_, _ = javaSend("mlock_unlock")
+		_, _ = javaSend("lock_release")
+		interopCleanup(t, n1, n2)
+	})
+	ml := client.GetMultiLock(client.GetLock(n1), client.GetLock(n2))
+	holder := client.HolderID("1")
+
+	if reply, err := javaSend("lock_hold " + n2); err != nil || reply["acquired"] != true {
+		t.Fatalf("java hold member = %v, %v", reply, err)
+	}
+	ok, err := ml.TryLock(testCtx, holder, time.Minute)
+	if err != nil || ok {
+		t.Fatalf("Go MultiLock while java holds a member = %v, %v", ok, err)
+	}
+	mustJava(t, "lock_release")
+
+	ok, err = ml.TryLock(testCtx, holder, time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("Go MultiLock free = %v, %v", ok, err)
+	}
+	if reply, err := javaSend("mlock_try " + n1 + " " + n2); err != nil || reply["acquired"] != false {
+		t.Fatalf("java MultiLock while Go holds = %v, %v", reply, err)
+	}
+	if err := ml.Unlock(testCtx, holder); err != nil {
+		t.Fatal(err)
+	}
+
+	if reply, err := javaSend("mlock_try " + n1 + " " + n2); err != nil || reply["acquired"] != true {
+		t.Fatalf("java MultiLock free = %v, %v", reply, err)
+	}
+	ok, err = ml.TryLock(testCtx, holder, time.Minute)
+	if err != nil || ok {
+		t.Fatalf("Go MultiLock while java holds both = %v, %v", ok, err)
+	}
+	mustJava(t, "mlock_unlock")
+}
+
+func TestJavaInterop_RRedLock(t *testing.T) {
+	javaProbe(t)
+	client := newTestClient(t)
+	n1 := uniqueKey(t, "jio-rl-1")
+	n2 := uniqueKey(t, "jio-rl-2")
+	n3 := uniqueKey(t, "jio-rl-3")
+	t.Cleanup(func() {
+		_, _ = javaSend("mlock_unlock")
+		_, _ = javaSend("redlock_unlock")
+		interopCleanup(t, n1, n2, n3)
+	})
+	rl := client.NewRedLock(client.GetLock(n1), client.GetLock(n2), client.GetLock(n3))
+	holder := client.HolderID("1")
+
+	// Java MultiLock holds 2/3 members → Go majority RedLock must fail.
+	if reply, err := javaSend("mlock_try " + n1 + " " + n2); err != nil || reply["acquired"] != true {
+		t.Fatalf("java hold majority members = %v, %v", reply, err)
+	}
+	ok, err := rl.TryLock(testCtx, holder, time.Minute)
+	if err != nil || ok {
+		t.Fatalf("Go RedLock with 1/3 free = %v, %v", ok, err)
+	}
+	mustJava(t, "mlock_unlock")
+
+	ok, err = rl.TryLock(testCtx, holder, time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("Go RedLock free = %v, %v", ok, err)
+	}
+	if reply, err := javaSend("redlock_try " + n1 + " " + n2 + " " + n3); err != nil || reply["acquired"] != false {
+		t.Fatalf("java RedLock while Go holds majority = %v, %v", reply, err)
+	}
+	if err := rl.Unlock(testCtx, holder); err != nil {
+		t.Fatal(err)
+	}
+
+	if reply, err := javaSend("redlock_try " + n1 + " " + n2 + " " + n3); err != nil || reply["acquired"] != true {
+		t.Fatalf("java RedLock free = %v, %v", reply, err)
+	}
+	ok, err = rl.TryLock(testCtx, holder, time.Minute)
+	if err != nil || ok {
+		t.Fatalf("Go RedLock while java holds = %v, %v", ok, err)
+	}
+	mustJava(t, "redlock_unlock")
+}

@@ -75,6 +75,8 @@ public final class RedigoProbe {
     private static RLock heldSpin;
     private static RLock heldNonReentrant;
     private static RLock heldNonReentrantFair;
+    private static RLock heldMulti;
+    private static RLock heldRedLock;
     private static RReadWriteLock heldRwLock;
     private static org.redisson.api.RFencedLock heldFenced;
     private static String heldPermit;
@@ -126,6 +128,12 @@ public final class RedigoProbe {
         if (heldFair != null && heldFair.isHeldByCurrentThread()) {
             heldFair.unlock();
         }
+        if (heldMulti != null && heldMulti.isHeldByCurrentThread()) {
+            heldMulti.unlock();
+        }
+        if (heldRedLock != null && heldRedLock.isHeldByCurrentThread()) {
+            heldRedLock.unlock();
+        }
         if (heldRwLock != null && heldRwLock.writeLock().isHeldByCurrentThread()) {
             heldRwLock.writeLock().unlock();
         }
@@ -159,6 +167,39 @@ public final class RedigoProbe {
                 }
                 heldLock = null;
                 reply(map("released", true));
+            }
+
+            case "mlock_try" -> {
+                RLock left = rs.getLock(a[1]);
+                RLock right = rs.getLock(a[2]);
+                RLock ml = rs.getMultiLock(left, right);
+                boolean acq = ml.tryLock(0, 60000, TimeUnit.MILLISECONDS);
+                heldMulti = acq ? ml : null;
+                reply(map("acquired", acq));
+            }
+            case "mlock_unlock" -> {
+                if (heldMulti != null && heldMulti.isHeldByCurrentThread()) {
+                    heldMulti.unlock();
+                }
+                heldMulti = null;
+                reply(map("ok", true));
+            }
+
+            case "redlock_try" -> {
+                RLock x = rs.getLock(a[1]);
+                RLock y = rs.getLock(a[2]);
+                RLock z = rs.getLock(a[3]);
+                RLock rl = rs.getRedLock(x, y, z);
+                boolean acq = rl.tryLock(0, 60000, TimeUnit.MILLISECONDS);
+                heldRedLock = acq ? rl : null;
+                reply(map("acquired", acq));
+            }
+            case "redlock_unlock" -> {
+                if (heldRedLock != null && heldRedLock.isHeldByCurrentThread()) {
+                    heldRedLock.unlock();
+                }
+                heldRedLock = null;
+                reply(map("ok", true));
             }
 
             case "fair_try" -> {

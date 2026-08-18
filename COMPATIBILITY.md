@@ -2,7 +2,7 @@
 
 > 与 Java Redisson（`JsonJacksonCodec`，无类型信息）及 redi.py 的互操作状态。
 > wire 依据：Redisson 4.6.x 源码 + Java 实测 + redi.py 双向实测结论。
-> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **54 个 `TestJavaInterop_*` 测试函数**（含 Topic / PatternTopic / Script / Buckets / Keys / Set / Queue / Deque / BlockingQueue / BlockingDeque / Batch / Maps / Multimap / DoubleAdder 等）；CI 有独立 `java-interop` job**。
+> Go 侧契约测试：`wire_compat_test.go` + `wire_compat2_test.go` + `rfairlock_test.go` + `rbinarystream_test.go`（**24 组，覆盖自定义 wire 结构的 key/channel/编码布局——CI 无 JVM 时由它们守护 wire**）；**redi.py 双向回归：`interop_redipy_test.go`；Java（Redisson 4.6.1）直接双向回归由单 JVM REPL 探针 `interop/java-probe/` 驱动，共 **56 个 `TestJavaInterop_*` 测试函数**（含 Topic / PatternTopic / Script / Buckets / Keys / Set / Queue / Deque / BlockingQueue / BlockingDeque / Batch / Maps / MultiLock / RedLock / Multimap / DoubleAdder 等）；CI 有独立 `java-interop` job**。
 
 ## 重要 wire 事实（Java 实测）
 
@@ -65,8 +65,8 @@
 | RClientSideCaching | **PARTIAL**：`Config.ClientSideCaching` 或 `GetClientSideCachingWithOptions` → go-redis RESP3 CLIENT TRACKING（standalone DB0，可配置 MaxEntries/MaxMemory/DrainInterval/MaxStaleness）；工厂转发；非 Java 读代理/EvictionPolicy | 失效回归（跨连接写后读可见）✅ |
 | RLongAdder / RDoubleAdder | Redisson BaseAdder 协议（源码复刻）：channel `{name}:adder-topic`（消息 `1:<id>`=SUM / `0:<id>`=CLEAR，明文）+ flush 目标 `{name}:{id}:counter`（INCRBY/INCRBYFLOAT）+ 栅栏 `{name}:{id}:semaphore`（publish 返回订阅数 n，请求者 acquire n 后 GETDEL 汇总）；请求者自身订阅并响应，非破坏性 Sum | **Redisson 4.6.1 跨语言实测 ✅**（Go 加 100 + Java 加 23 → 双方 Sum 均 123；再 +7 → 双方 130，非破坏） |
 | RFencedLock | RLock 布局 + `redisson_lock_token:{name}` 计数器；acquire Lua 同 Redisson 原版（`INCR` token —— **重入也递增**；成功返回 `{-1,token}`）；GetToken 为十进制 GET（StringCodec） | wire 契约 + **Redisson 4.6.1 跨语言 token/互斥实测 ✅** |
-| RMultiLock | 纯客户端编排（成员即普通 RLock） | 单元测试 ✅（全有或全无 + 失败回滚） |
-| RRedLock | 纯客户端编排；N 个独立 RLock 中获取 `floor(N/2)+1` 即成功，失败回滚已获取成员，Unlock 尝试全部成员 | RedissonRedLock 4.6.1 多数派/分摊等待源码对照 + 2/3 成功、1/3 回滚单元测试 ✅ |
+| RMultiLock | 纯客户端编排（成员即普通 RLock） | 单元测试 ✅ + **Redisson 4.6.1 交叉持锁双向实测 ✅** |
+| RRedLock | 纯客户端编排；N 个独立 RLock 中获取 `floor(N/2)+1` 即成功，失败回滚已获取成员，Unlock 尝试全部成员 | 单元测试 ✅ + **Redisson 4.6.1 多数派交叉持锁双向实测 ✅** |
 | RTimeSeries | 源码复刻：ZSET `{name}`（score=时间戳，member=`struct.pack('BBc0Lc0Lc0',4,idLen,id,valLen,val,lblLen,lbl)`，id 来自 `redisson__ts_seq:{name}` 零填充 20 位序列）+ 过期 ZSET `redisson__ts_ttl:{name}`（TTL 分支 score=截止时刻；无 TTL 分支=now+100 年取 max 再 +1）；label blob=mark 字节(2 无/3 有)+label；Size=ZCARD−过期（惰性） | wire 契约 + **Redisson 4.6.1 双向实测 ✅**（Go 写→Java 精确时间戳读回；Java 写→Go Range 解码 + size 一致） |
 | RRingBuffer | LIST `{name}` + 容量 STRING `redisson_rb:{name}`（SETNX，十进制）；溢出 RPUSH+LPOP（批量 LTRIM；SetCapacity 即时裁剪）—— Lua 同 Java 原版 | wire 契约 ✅ |
 | RShardedTopic | Redis 7+ SSUBSCRIBE/SSPUBLISH（codec 编码消息；PUBSUB SHARDNUMSUB 计数） | Redis 原生协议，跨语言自动互通 ✅ |
@@ -97,7 +97,7 @@ go test -run TestJavaInterop -v .    # Go ↔ Java Redisson 4.6.1（直接；需
 | 工厂 | 状态 | 备注 |
 |------|------|------|
 | getLock / getFairLock / getSpinLock / getNonReentrant* / getFencedLock / getReadWriteLock | WIRE_OK | Spin/NonReentrant/NonReentrantFair Java 双向实测 ✅；RWLock 续期 companion 与 Java 不完全同形，互斥 WIRE_OK |
-| getMultiLock / getRedLock | WIRE_OK | 客户端编排；Go `GetMultiLock`/`NewMultiLock` |
+| getMultiLock / getRedLock | WIRE_OK | 客户端编排；**Redisson 4.6.1 交叉持锁/多数派双向实测 ✅** |
 | getMap / getList / getSet / getQueue / getDeque / getBlocking* / getBoundedBlockingQueue | WIRE_OK | Set / Queue / Deque / BlockingQueue / BlockingDeque Java 双向实测 ✅ |
 | getMapCache / getMapCacheNative | WIRE_OK / NATIVE_OK | Native 需 Redis≥7.4；MapCacheNative Java 双向实测 ✅ |
 | getSetCache / get*Multimap / get*MultimapCache / get*MultimapCacheNative | WIRE_OK / NATIVE_OK | Set/List Multimap(+Cache/Native) / SetCache Java 双向实测 ✅ |

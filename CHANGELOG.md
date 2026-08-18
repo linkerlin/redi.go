@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **维护 Java 互操作（锁编排）**：MultiLock 全员互斥、RedLock 多数派交叉持锁；`TestJavaInterop_*` **54 → 56**
 - **维护 Java 互操作（续）**：BlockingQueue / Batch 双向探针；Maps 为 Go Set → Java RMap 读（4.6.1 无 `getMaps`）；`TestJavaInterop_*` **51 → 54**
 - **维护 Java 互操作**：Deque / BlockingDeque / PatternTopic 双向探针；`TestJavaInterop_*` **48 → 51**；校准 NonReentrantFairLock / PatternTopic / BlockingDeque 文档状态
 - **维护 e2e（二轮）**：补 Map/Set 键级同步器、DoubleAdder、MapCache GetInto/监听/驱逐、RedLock Wait、BQ PollWithTimeout、PriorityBlockingDeque、DelayedQueue Peek、List RemoveByIndex、RateLimiter keepAlive、LCM PutIfAbsent、BoundedBQ Put、BinaryStream Write 等；包语句覆盖率约 **75.5%**
