@@ -260,6 +260,15 @@ public final class RedigoProbe {
                 RMap<Object, Object> m = rs.getMap(a[1]);
                 reply(map("value", m.get(OM.readValue(a[2], Object.class))));
             }
+            case "map_remove" -> {
+                RMap<Object, Object> m = rs.getMap(a[1]);
+                reply(map("value", m.remove(OM.readValue(a[2], Object.class))));
+            }
+            case "map_remove_if" -> {
+                RMap<Object, Object> m = rs.getMap(a[1]);
+                reply(map("ok", m.remove(OM.readValue(a[2], Object.class),
+                        OM.readValue(a[3], Object.class))));
+            }
 
             case "batch_map_put" -> {
                 RBatch batch = rs.createBatch();
@@ -312,6 +321,14 @@ public final class RedigoProbe {
                 RList<Object> l = rs.getList(a[1]);
                 reply(map("size", l.size()));
             }
+            case "list_get_many" -> {
+                RList<Object> l = rs.getList(a[1]);
+                int[] idx = new int[a.length - 2];
+                for (int i = 2; i < a.length; i++) {
+                    idx[i - 2] = Integer.parseInt(a[i]);
+                }
+                reply(map("value", l.get(idx)));
+            }
 
             case "zset_add" -> {
                 RScoredSortedSet<Object> z = rs.getScoredSortedSet(a[1]);
@@ -354,6 +371,15 @@ public final class RedigoProbe {
                 reply(map("value", b.getAndExpire(
                         java.time.Duration.ofMillis(Long.parseLong(a[2])))));
             }
+            case "bucket_expire_if_set" -> {
+                RBucket<Object> b = rs.getBucket(a[1]);
+                reply(map("ok", b.expireIfSet(
+                        java.time.Duration.ofMillis(Long.parseLong(a[2])))));
+            }
+            case "bucket_expire_time" -> {
+                RBucket<Object> b = rs.getBucket(a[1]);
+                reply(map("value", b.getExpireTime()));
+            }
             case "binary_set" -> {
                 RBinaryStream s = rs.getBinaryStream(a[1]);
                 byte[] value = Base64.getDecoder().decode(a[2]);
@@ -390,6 +416,13 @@ public final class RedigoProbe {
             case "mapcache_get_ttl_only" -> {
                 RMapCache<Object, Object> mc = rs.getMapCache(a[1]);
                 reply(map("value", mc.getWithTTLOnly(OM.readValue(a[2], Object.class))));
+            }
+            case "mapcache_putall_ttl" -> {
+                RMapCache<Object, Object> mc = rs.getMapCache(a[1]);
+                java.util.Map<Object, Object> entries = new HashMap<>();
+                entries.put(OM.readValue(a[2], Object.class), OM.readValue(a[3], Object.class));
+                mc.putAll(entries, Long.parseLong(a[4]), TimeUnit.MILLISECONDS);
+                reply(map("ok", true));
             }
 
             case "dq_offer" -> {
@@ -1042,6 +1075,14 @@ public final class RedigoProbe {
             case "bloom_contains" -> {
                 RBloomFilter<Object> f = rs.getBloomFilter(a[1]);
                 reply(map("contains", f.contains(OM.readValue(a[2], Object.class))));
+            }
+            case "bloom_exists" -> {
+                RBloomFilter<Object> f = rs.getBloomFilter(a[1]);
+                java.util.List<Object> els = new ArrayList<>();
+                for (int i = 2; i < a.length; i++) {
+                    els.add(OM.readValue(a[i], Object.class));
+                }
+                reply(map("value", f.exists(els)));
             }
 
             case "rate_set" -> {

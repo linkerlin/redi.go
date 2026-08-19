@@ -36,15 +36,15 @@
 | RBoundedBlockingQueue | LIST `{name}` + 容量 STRING `redisson_bqs:{name}` + channel `redisson_sc:redisson_bqs:{name}`；Offer 原子 DECR+RPUSH，Poll 原子 LPOP+INCR+PUBLISH | Redisson 4.6.1 双向实测 ✅（capacity/offer/poll） |
 | RScoredSortedSet | ZSET + JSON member | **Redisson 4.6.1 score/rank 双向实测 ✅** |
 | RLexSortedSet | ZSET + 字典序操作，成员**裸存储**（跳过 codec，Redisson 特例）；含 rank/random 与正反向 rank/lex range | **Redisson 4.6.1 add/range 双向实测 ✅** |
-| RBucket | 裸名 + JSON 值（毫秒 TTL） | **Redisson 4.6.1 双向实测 ✅** |
+| RBucket | 裸名 + JSON 值（毫秒 TTL）；`ExpireIf*`/`ExpireTime` 走 PEXPIRE(AT) NX/XX/GT/LT 与 PEXPIRETIME | **Redisson 4.6.1 双向实测 ✅** |
 | RBinaryStream | 裸名 Redis STRING + 原始字节（`ByteArrayCodec`，不经过配置 Codec）；APPEND/GETRANGE/SETRANGE，缩短截断以 GETRANGE+SET 重写 | wire 契约 + **Redisson 4.6.1 set/get/channel 偏移写双向实测 ✅** |
-| RMapCache | `<dQ` struct 打包值 + timeout/idle ZSET；容量配置 HASH `{name}:redisson_options`，LRU/LFU 排序 ZSET `redisson__map_cache__last_access__set:{name}`；Put/FastPut 原子容量淘汰并清理 companion；entry 事件走 `redisson_map_cache_{kind}:{name}` | wire 契约 + max-size surface 回归 + **Redisson 4.6.1 双向读写实测 ✅**；事件通道 Go 内消费，跨语言监听非目标 |
+| RMapCache | `<dQ` struct 打包值 + timeout/idle ZSET；容量配置 HASH `{name}:redisson_options`，LRU/LFU 排序 ZSET `redisson__map_cache__last_access__set:{name}`；Put/FastPut 原子容量淘汰并清理 companion；entry 事件走 `redisson_map_cache_{kind}:{name}`；`PutAllWithTTL` | wire 契约 + max-size surface 回归 + **Redisson 4.6.1 双向读写实测 ✅**；事件通道 Go 内消费，跨语言监听非目标 |
 | RMapCacheNative | 普通 HASH 值（无 packed 头）+ `HPEXPIRE`/`HPEXPIREAT`/`HPTTL` 字段过期（Redis ≥7.4） | RedissonMapCacheNative 4.6.1 Lua 对照 + 单元测试（命令缺失自动 skip） |
 | RSetMultimapCacheNative / RListMultimapCacheNative | RMultimap 布局；`ExpireKey` = `HPEXPIRE` 索引 field + `PEXPIRE` 集合键 | RedissonMultimapCacheNative 源码对照 + 单元测试（命令缺失自动 skip） |
 | RBloomFilterNative / RCuckooFilter / RTopK / RTDigest / RGcra | Redis `BF.*` / `CF.*` / `TOPK.*` / `TDIGEST.*` / `GCRA`（元素经 codec 编码，除 TDigest/GCRA） | Redis 原生命令门面 + 冒烟测试（命令缺失自动 skip） |
 | RDelayedQueue | ZSET `redisson_delay_queue_timeout:{name}` + LIST `redisson_delay_queue:{name}`（struct-packed member；Contains/Remove/ReadAll/Clear 均用 `struct.unpack` 并同步双结构） | **Redisson 4.6.1 双向迁移实测 ✅** + pending surface 回归 |
 | RAtomicLong / RAtomicDouble | 裸名十进制字符串（StringCodec 语义） | wire 契约 + **AtomicLong/AtomicDouble：Redisson 4.6.1 双向实测 ✅** |
-| RBloomFilter | 位图裸名 + `{name}:config` HASH，HighwayHash-128（Redisson 固定 KEY），Java 截断/半上取整公式 | **Redisson 4.6.1 位/公式双向实测 ✅** |
+| RBloomFilter | 位图裸名 + `{name}:config` HASH，HighwayHash-128（Redisson 固定 KEY），Java 截断/半上取整公式；`Exists` 返回可能存在的子集 | **Redisson 4.6.1 位/公式双向实测 ✅** |
 | RIdGenerator | `{name}` 计数 + `{name}:allocation`；分配区间 `[current,current+allocationSize)`，默认批量 5000 | wire 契约 + **Redisson 4.6.1 alloc=1 交错发号双向实测 ✅** |
 | RSetCache | 单 ZSET（member=值，score=绝对过期时刻；无 TTL = MaxInt64）+ idle ZSET `redisson__idle__set:{name}`；ReadAll/随机/ContainsAll/RemoveAll/RetainAll 先清过期并同步 companion | wire 契约 + surface 回归 ✅ |
 | RMultimap（Set/List） | HASH `{name}`（field=JSON key → 内部 ID）+ 集合 `{name}:{id}`；ID = HighwayHash-128 大端 + 无填充 base64（Java `Hash.hash128toBase64`） | wire 契约 + **redi.py 内部 ID 字节级 + 双向读写实测 ✅** |
@@ -56,7 +56,7 @@
 | RGeo | GEOADD（含 XX/批量）/GEOSEARCH/GEOSEARCHSTORE/GEOPOS/GEOHASH/GEODIST（codec 编码成员；Redis 8 兼容） | **Redisson 4.6.1 双向 pos/dist 实测 ✅** + bulk/store 回归 |
 | RBitSet | 原生 GETBIT/SETBIT 位序（与 Java RedissonBitSet 一致，无位反转；MSB-first 字节数组） | **Redisson 4.6.1 双向位/cardinality/length 实测 ✅** |
 | RStream | XADD/XRANGE/XREADGROUP/XPENDING/XACK/XCLAIM/XAUTOCLAIM；field 名与值均 codec 编码（Redisson RStream 同款）；消费组为 Redis 原生 | **Redisson 4.6.1 双向实测 ✅**（Java 写→Go 组读、跨语言 Ack、Go 写→Java 新组读全史） |
-| RPermitExpirableSemaphore | STRING `{name}` 计数 + ZSET `{name}:timeout`（member=许可 ID，score=到期时刻）+ channel `redisson_sc:{name}`；过期回收在 acquire 与读路径惰性执行（Lua） | **Redisson 4.6.1 共享许可池实测 ✅**（Java 租借→Go 可见 0；Java 释放→Go 获取） |
+| RPermitExpirableSemaphore | STRING `{name}` 计数 + ZSET `{name}:timeout`（member=许可 ID，score=到期时刻）+ channel `redisson_sc:{name}`；`TrySetPermits` 初始化时 PUBLISH；过期回收在 acquire 与读路径惰性执行（Lua） | **Redisson 4.6.1 共享许可池实测 ✅**（Java 租借→Go 可见 0；Java 释放→Go 获取） |
 | RReliableTopic | STREAM `{name}`（XADD field **`m`**）+ **每订阅者独立消费组**（组名=subscriberId，Java 语义：各组收全量；redi.py 单组多 consumer 实为负载均衡，语义错误）+ ZSET `{name}:timeout` 活性（watchdog/3 刷新）；回调返回后才 XACK（崩溃重投递） | **Redisson 4.6.1 实测 ✅**（Go 发布→Java 监听收到；Go/Java 订阅组各收全量） |
 | RLocalCachedMap | 数据层 = RMap wire 格式（✅ 跨语言读写）；**失效广播为 Go 内部协议**（channel `{name}:inval`，JSON 消息）——Java 的 LocalCachedMapInvalidation（keyHash 二进制数组 + 更新日志 + Java 序列化对象）未复刻，Java 写入不会实时失效 Go 本地缓存（Go 读有 Redis 兜底） | 数据层 **Redisson 4.6.1 双向读写实测 ✅**；失效广播 Go↔Go ✅ / Java↔Go ❌（诚实标注） |
 | RPriorityQueue | **非 Java 同名协议**：Go 为 ZSET+score 优先队列；Redisson RPriorityQueue 为 LIST+Comparator，**不可与 `getPriorityQueue()` 互操作**（可按 raw ZSET / RScoredSortedSet 族访问） | 单元测试 ✅（自有语义） |

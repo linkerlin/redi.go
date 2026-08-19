@@ -562,6 +562,59 @@ func (m *RMapCache) PutAll(ctx context.Context, entries map[string]any) error {
 	return nil
 }
 
+// PutAllWithTTL is PutAll with a shared per-entry ttl and optional maxIdle
+// (Redisson putAll(map, ttl, unit[, maxIdle, maxIdleUnit])).
+func (m *RMapCache) PutAllWithTTL(
+	ctx context.Context, entries map[string]any, ttl, maxIdle time.Duration,
+) error {
+	if ttl < 0 || maxIdle < 0 {
+		return fmt.Errorf("redi: map cache ttl/maxIdle must not be negative")
+	}
+	if ttl == 0 && maxIdle == 0 {
+		return m.PutAll(ctx, entries)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	type encodedEntry struct {
+		field string
+		value string
+	}
+	encoded := make([]encodedEntry, 0, len(entries))
+	for field, value := range entries {
+		enc, err := m.c.codec.Encode(value)
+		if err != nil {
+			return err
+		}
+		encoded = append(encoded, encodedEntry{
+			field: encodeKey(m.c.codec, field),
+			value: packValue(enc, float64(maxIdle.Milliseconds())),
+		})
+	}
+	if _, err := m.EvictExpired(ctx); err != nil {
+		return err
+	}
+	now, err := m.serverNowMs(ctx)
+	if err != nil {
+		return err
+	}
+	expiry, idleExpiry := int64(0), int64(0)
+	if ttl > 0 {
+		expiry = now + ttl.Milliseconds()
+	}
+	if maxIdle > 0 {
+		idleExpiry = now + maxIdle.Milliseconds()
+	}
+	for _, entry := range encoded {
+		if _, err := mapCachePutScript.Run(ctx, m.rc(),
+			[]string{m.name, m.ttlKey, m.idleKey, m.lastAccessKey, m.optionsKey},
+			entry.field, entry.value, expiry, idleExpiry, now).Result(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // PutIfAbsent sets field only when absent, with optional ttl/maxIdle.
 // Returns true when set.
 func (m *RMapCache) PutIfAbsent(ctx context.Context, field string, value any, durations ...time.Duration) (bool, error) {

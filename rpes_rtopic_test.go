@@ -79,6 +79,44 @@ func TestRPermitExpirableSemaphore(t *testing.T) {
 	_ = pid4
 }
 
+func TestRPermitExpirableSemaphore_TrySetPermitsPublishes(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "pes-setpub")
+	s := client.GetPermitExpirableSemaphore(name)
+	defer s.Delete(testCtx) //nolint:errcheck
+
+	channel := "redisson_sc:{" + name + "}"
+	sub := client.Redis().Subscribe(testCtx, channel)
+	defer sub.Close() //nolint:errcheck
+	if _, err := sub.Receive(testCtx); err != nil {
+		t.Fatal("subscribe ack:", err)
+	}
+	msgs := sub.Channel()
+
+	ok, err := s.TrySetPermits(testCtx, 3)
+	if err != nil || !ok {
+		t.Fatalf("TrySetPermits = %v, %v", ok, err)
+	}
+	select {
+	case msg := <-msgs:
+		if msg.Payload != "3" {
+			t.Fatalf("publish payload = %q, want 3", msg.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("TrySetPermits did not PUBLISH to redisson_sc")
+	}
+
+	ok, err = s.TrySetPermits(testCtx, 9)
+	if err != nil || ok {
+		t.Fatalf("second TrySetPermits = %v, %v; want false", ok, err)
+	}
+	select {
+	case msg := <-msgs:
+		t.Fatalf("second TrySetPermits published %q", msg.Payload)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func TestRPermitExpirableSemaphore_Blocking(t *testing.T) {
 	client := newTestClient(t)
 	s := client.GetPermitExpirableSemaphore(uniqueKey(t, "pes-block"))

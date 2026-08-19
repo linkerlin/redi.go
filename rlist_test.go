@@ -118,3 +118,24 @@ func TestRList_Surface(t *testing.T) {
 		t.Fatalf("FastSet Get = %v", z)
 	}
 }
+
+func TestRList_GetMany(t *testing.T) {
+	client := newTestClient(t)
+	l := client.GetRList(uniqueKey(t, "getmany"))
+	defer l.Clear(testCtx) //nolint:errcheck
+
+	if err := l.Add(testCtx, "a", "b", "c"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.GetMany(testCtx, 2, 0, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0] != "c" || got[1] != "a" || got[2] != nil {
+		t.Fatalf("GetMany = %#v; want [c a <nil>]", got)
+	}
+	empty, err := l.GetMany(testCtx)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty GetMany = %#v, %v", empty, err)
+	}
+}

@@ -43,6 +43,18 @@ func TestRBloomFilter(t *testing.T) {
 	if err != nil || n < 1 {
 		t.Fatalf("Count = %d, %v; want >= 1", n, err)
 	}
+
+	present, err := f.Exists(testCtx, "apple", "missing-xyz", "apple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(present) != 2 || present[0] != "apple" || present[1] != "apple" {
+		t.Fatalf("Exists = %#v; want [apple apple]", present)
+	}
+	none, err := f.Exists(testCtx)
+	if err != nil || len(none) != 0 {
+		t.Fatalf("empty Exists = %#v, %v", none, err)
+	}
 }
 
 func TestRIdGenerator(t *testing.T) {
@@ -207,5 +219,29 @@ func TestRMapCache_RemainTTLMatchesJava(t *testing.T) {
 	still, err := m.GetWithTTLOnly(testCtx, "ttl-only")
 	if err != nil || still != "keep" {
 		t.Fatalf("GetWithTTLOnly after idle expiry = %v, %v; want keep", still, err)
+	}
+}
+
+func TestRMapCache_PutAllWithTTL(t *testing.T) {
+	client := newTestClient(t)
+	m := client.GetMapCache(uniqueKey(t, "mapcache-putall-ttl"))
+	defer m.Clear(testCtx) //nolint:errcheck
+
+	if err := m.PutAllWithTTL(testCtx, map[string]any{"a": "1", "b": "2"}, 300*time.Millisecond, 0); err != nil {
+		t.Fatal(err)
+	}
+	v, err := m.Get(testCtx, "a")
+	if err != nil || v != "1" {
+		t.Fatalf("Get a = %v, %v", v, err)
+	}
+	rem, err := m.RemainTTLForKey(testCtx, "b")
+	if err != nil || rem <= 0 || rem > 300*time.Millisecond {
+		t.Fatalf("RemainTTLForKey b = %v, %v; want (0, 300ms]", rem, err)
+	}
+	if !eventual(t, 2*time.Second, func() bool {
+		v, _ := m.Get(testCtx, "a")
+		return v == nil
+	}) {
+		t.Fatal("PutAllWithTTL entries did not expire")
 	}
 }

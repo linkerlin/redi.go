@@ -106,6 +106,71 @@ func (o *rObject) ExpireAt(ctx context.Context, ts time.Time) (bool, error) {
 	return o.rc().ExpireAt(ctx, o.name, ts).Result()
 }
 
+// ExpireIfSet is PEXPIRE XX (Redisson expireIfSet(Duration)).
+func (o *rObject) ExpireIfSet(ctx context.Context, ttl time.Duration) (bool, error) {
+	return o.expireIf(ctx, ttl.Milliseconds(), "XX")
+}
+
+// ExpireIfNotSet is PEXPIRE NX (Redisson expireIfNotSet(Duration)).
+func (o *rObject) ExpireIfNotSet(ctx context.Context, ttl time.Duration) (bool, error) {
+	return o.expireIf(ctx, ttl.Milliseconds(), "NX")
+}
+
+// ExpireIfGreater is PEXPIRE GT (Redisson expireIfGreater(Duration)).
+func (o *rObject) ExpireIfGreater(ctx context.Context, ttl time.Duration) (bool, error) {
+	return o.expireIf(ctx, ttl.Milliseconds(), "GT")
+}
+
+// ExpireIfLess is PEXPIRE LT (Redisson expireIfLess(Duration)).
+func (o *rObject) ExpireIfLess(ctx context.Context, ttl time.Duration) (bool, error) {
+	return o.expireIf(ctx, ttl.Milliseconds(), "LT")
+}
+
+// ExpireIfSetAt is PEXPIREAT XX (Redisson expireIfSet(Instant)).
+func (o *rObject) ExpireIfSetAt(ctx context.Context, ts time.Time) (bool, error) {
+	return o.expireIfAt(ctx, ts.UnixMilli(), "XX")
+}
+
+// ExpireIfNotSetAt is PEXPIREAT NX (Redisson expireIfNotSet(Instant)).
+func (o *rObject) ExpireIfNotSetAt(ctx context.Context, ts time.Time) (bool, error) {
+	return o.expireIfAt(ctx, ts.UnixMilli(), "NX")
+}
+
+// ExpireIfGreaterAt is PEXPIREAT GT (Redisson expireIfGreater(Instant)).
+func (o *rObject) ExpireIfGreaterAt(ctx context.Context, ts time.Time) (bool, error) {
+	return o.expireIfAt(ctx, ts.UnixMilli(), "GT")
+}
+
+// ExpireIfLessAt is PEXPIREAT LT (Redisson expireIfLess(Instant)).
+func (o *rObject) ExpireIfLessAt(ctx context.Context, ts time.Time) (bool, error) {
+	return o.expireIfAt(ctx, ts.UnixMilli(), "LT")
+}
+
+func (o *rObject) expireIf(ctx context.Context, ttlMs int64, mode string) (bool, error) {
+	n, err := expireIfScript.Run(ctx, o.rc(), []string{o.name}, ttlMs, mode).Int()
+	return n == 1, err
+}
+
+func (o *rObject) expireIfAt(ctx context.Context, unixMs int64, mode string) (bool, error) {
+	n, err := expireIfAtScript.Run(ctx, o.rc(), []string{o.name}, unixMs, mode).Int()
+	return n == 1, err
+}
+
+// ExpireTime is PEXPIRETIME (unix ms). -1 means no expiry, -2 missing
+// (Redisson getExpireTime). go-redis maps Redis -1/-2 to nanosecond
+// durations rather than milliseconds, so those sentinels are unwrapped
+// before converting a real timestamp.
+func (o *rObject) ExpireTime(ctx context.Context) (int64, error) {
+	d, err := o.rc().PExpireTime(ctx, o.name).Result()
+	if err != nil {
+		return 0, err
+	}
+	if d == -1 || d == -2 {
+		return int64(d), nil
+	}
+	return d.Milliseconds(), nil
+}
+
 // ClearExpire removes the TTL (key becomes persistent).
 func (o *rObject) ClearExpire(ctx context.Context) (bool, error) {
 	return o.rc().Persist(ctx, o.name).Result()
@@ -179,3 +244,19 @@ func (o *rObject) serverNowMs(ctx context.Context) (int64, error) {
 	}
 	return t.UnixMilli(), nil
 }
+
+// Redisson expireIf*(Duration): PEXPIRE with NX/XX/GT/LT.
+var expireIfScript = redis.NewScript(`
+if ARGV[2] ~= '' then
+    return redis.call('pexpire', KEYS[1], ARGV[1], ARGV[2])
+end
+return redis.call('pexpire', KEYS[1], ARGV[1])
+`)
+
+// Redisson expireIf*(Instant): PEXPIREAT with NX/XX/GT/LT.
+var expireIfAtScript = redis.NewScript(`
+if ARGV[2] ~= '' then
+    return redis.call('pexpireat', KEYS[1], ARGV[1], ARGV[2])
+end
+return redis.call('pexpireat', KEYS[1], ARGV[1])
+`)

@@ -320,6 +320,40 @@ func (m *RMap) FastReplace(ctx context.Context, field string, value any) (bool, 
 	return m.FastPutIfExists(ctx, field, value)
 }
 
+// Remove deletes field and returns the previous value, or (nil, nil) when
+// absent (Redisson Map.remove(K)).
+func (m *RMap) Remove(ctx context.Context, field string) (any, error) {
+	res, err := mapRemoveScript.Run(ctx, m.rc(),
+		[]string{m.name}, encodeKey(m.c.codec, field)).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	s, ok := res.(string)
+	if !ok {
+		return nil, nil
+	}
+	return m.c.codec.Decode(s)
+}
+
+// RemoveIf deletes field only when the current value equals value
+// (codec-encoded equality). Returns true when deleted (Redisson
+// Map.remove(K, V)).
+func (m *RMap) RemoveIf(ctx context.Context, field string, value any) (bool, error) {
+	enc, err := m.c.codec.Encode(value)
+	if err != nil {
+		return false, err
+	}
+	n, err := mapRemoveIfScript.Run(ctx, m.rc(),
+		[]string{m.name}, encodeKey(m.c.codec, field), enc).Int()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 // FastRemove deletes fields and returns how many were actually removed
 // (Redisson fastRemove / HDEL).
 func (m *RMap) FastRemove(ctx context.Context, fields ...string) (int64, error) {
@@ -402,6 +436,21 @@ var mapFastReplaceScript = redis.NewScript(`
 if redis.call('hexists', KEYS[1], ARGV[1]) == 1 then
     redis.call('hset', KEYS[1], ARGV[1], ARGV[2])
     return 1
+end
+return 0
+`)
+
+// Redisson Map.remove(K): return previous value (nil when absent).
+var mapRemoveScript = redis.NewScript(`
+local v = redis.call('hget', KEYS[1], ARGV[1])
+redis.call('hdel', KEYS[1], ARGV[1])
+return v
+`)
+
+// Redisson Map.remove(K, V): delete only on encoded-value match.
+var mapRemoveIfScript = redis.NewScript(`
+if redis.call('hget', KEYS[1], ARGV[1]) == ARGV[2] then
+    return redis.call('hdel', KEYS[1], ARGV[1])
 end
 return 0
 `)

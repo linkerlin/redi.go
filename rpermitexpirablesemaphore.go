@@ -74,9 +74,23 @@ return 0
 // ErrNoPermit is returned by Acquire when the context ends first.
 var ErrNoPermit = errors.New("redi: no permit acquired")
 
+// Java RedissonPermitExpirableSemaphore.trySetPermits: SET only when
+// absent, then PUBLISH to redisson_sc:{name} so blocked acquirers wake
+// (SETNX alone is silent).
+var permitTrySetPermitsScript = redis.NewScript(`
+if redis.call('get', KEYS[1]) == false then
+    redis.call('set', KEYS[1], ARGV[1])
+    redis.call('publish', KEYS[2], ARGV[1])
+    return 1
+end
+return 0
+`)
+
 // TrySetPermits initializes the counter only when it does not exist.
 func (s *RPermitExpirableSemaphore) TrySetPermits(ctx context.Context, permits int64) (bool, error) {
-	return s.rc().SetNX(ctx, s.name, permits, 0).Result()
+	n, err := permitTrySetPermitsScript.Run(ctx, s.rc(),
+		[]string{s.name, s.channel}, permits).Int()
+	return n == 1, err
 }
 
 // TryAcquire leases one permit for lease duration, returning its id

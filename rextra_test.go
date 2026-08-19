@@ -166,6 +166,78 @@ func TestRBucket_GetAndExpire(t *testing.T) {
 	}
 }
 
+func TestRObject_ExpireIf(t *testing.T) {
+	client := newTestClient(t)
+	b := client.GetBucket(uniqueKey(t, "expire-if"))
+	defer b.Delete(testCtx) //nolint:errcheck
+
+	missing, err := b.ExpireTime(testCtx)
+	if err != nil || missing != -2 {
+		t.Fatalf("ExpireTime missing = %d, %v; want -2", missing, err)
+	}
+
+	if err := b.Set(testCtx, "v"); err != nil {
+		t.Fatal(err)
+	}
+	none, err := b.ExpireTime(testCtx)
+	if err != nil || none != -1 {
+		t.Fatalf("ExpireTime persistent = %d, %v; want -1", none, err)
+	}
+
+	ok, err := b.ExpireIfSet(testCtx, time.Minute)
+	if err != nil || ok {
+		t.Fatalf("ExpireIfSet without TTL = %v, %v; want false", ok, err)
+	}
+	ok, err = b.ExpireIfNotSet(testCtx, time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfNotSet = %v, %v; want true", ok, err)
+	}
+	ok, err = b.ExpireIfNotSet(testCtx, 2*time.Minute)
+	if err != nil || ok {
+		t.Fatalf("ExpireIfNotSet already set = %v, %v; want false", ok, err)
+	}
+	ok, err = b.ExpireIfGreater(testCtx, 2*time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfGreater = %v, %v; want true", ok, err)
+	}
+	ok, err = b.ExpireIfGreater(testCtx, 10*time.Second)
+	if err != nil || ok {
+		t.Fatalf("ExpireIfGreater shorter = %v, %v; want false", ok, err)
+	}
+	ok, err = b.ExpireIfLess(testCtx, 10*time.Second)
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfLess = %v, %v; want true", ok, err)
+	}
+	ok, err = b.ExpireIfSet(testCtx, time.Hour)
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfSet with TTL = %v, %v; want true", ok, err)
+	}
+	at, err := b.ExpireTime(testCtx)
+	if err != nil || at <= time.Now().UnixMilli() {
+		t.Fatalf("ExpireTime after set = %d, %v", at, err)
+	}
+
+	ok, err = b.ExpireIfGreaterAt(testCtx, time.Now().Add(2*time.Hour))
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfGreaterAt = %v, %v; want true", ok, err)
+	}
+	ok, err = b.ExpireIfLessAt(testCtx, time.Now().Add(time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfLessAt = %v, %v; want true", ok, err)
+	}
+	ok, err = b.ExpireIfSetAt(testCtx, time.Now().Add(30*time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfSetAt = %v, %v; want true", ok, err)
+	}
+	if _, err := b.ClearExpire(testCtx); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = b.ExpireIfNotSetAt(testCtx, time.Now().Add(time.Hour))
+	if err != nil || !ok {
+		t.Fatalf("ExpireIfNotSetAt = %v, %v; want true", ok, err)
+	}
+}
+
 func TestRDeque(t *testing.T) {
 	client := newTestClient(t)
 	d := client.GetDeque(uniqueKey(t, "deque"))

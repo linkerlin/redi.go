@@ -195,6 +195,25 @@ func (f *RBloomFilter) Contains(ctx context.Context, element any) (bool, error) 
 	return true, nil
 }
 
+// Exists returns the subset of elements that may be present (Redisson
+// exists(Collection); false = definitely not).
+func (f *RBloomFilter) Exists(ctx context.Context, elements ...any) ([]any, error) {
+	if len(elements) == 0 {
+		return []any{}, nil
+	}
+	out := make([]any, 0, len(elements))
+	for _, element := range elements {
+		ok, err := f.Contains(ctx, element)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, element)
+		}
+	}
+	return out, nil
+}
+
 // ContainsAll returns how many supplied elements may be present.
 func (f *RBloomFilter) ContainsAll(ctx context.Context, elements ...any) (int64, error) {
 	var contained int64

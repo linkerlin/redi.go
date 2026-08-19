@@ -52,6 +52,38 @@ func (l *RList) Get(ctx context.Context, index int64) (any, error) {
 	return l.c.codec.Decode(v)
 }
 
+// GetMany returns elements at the given indexes (Redisson get(int...)).
+// Out-of-range indexes yield a nil slot; the result length matches indexes.
+func (l *RList) GetMany(ctx context.Context, indexes ...int64) ([]any, error) {
+	if len(indexes) == 0 {
+		return []any{}, nil
+	}
+	args := make([]any, len(indexes))
+	for i, idx := range indexes {
+		args[i] = idx
+	}
+	raw, err := listGetManyScript.Run(ctx, l.rc(), []string{l.name}, args...).Slice()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(indexes))
+	for i, v := range raw {
+		if v == nil {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		decoded, err := l.c.codec.Decode(s)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = decoded
+	}
+	return out, nil
+}
+
 // GetInto decodes the element at index into target. Returns false when
 // the index is out of range.
 func (l *RList) GetInto(ctx context.Context, index int64, target any) (bool, error) {
@@ -235,6 +267,14 @@ func (l *RList) decodeAll(vals []string) ([]any, error) {
 	}
 	return out, nil
 }
+
+var listGetManyScript = redis.NewScript(`
+local result = {}
+for i = 1, #ARGV do
+    result[i] = redis.call('lindex', KEYS[1], ARGV[i])
+end
+return result
+`)
 
 var listIndexOfScript = redis.NewScript(`
 local items = redis.call('lrange', KEYS[1], 0, -1)

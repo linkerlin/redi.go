@@ -299,6 +299,25 @@ func TestJavaInterop_RMap(t *testing.T) {
 			t.Fatalf("java read of Go struct = %#v", reply["value"])
 		}
 	}
+
+	if err := m.Put(testCtx, "rm", "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := javaSend("map_remove_if " + name + ` "rm" "nope"`); err != nil || reply["ok"] != false {
+		t.Fatalf("java remove(K,V) mismatch = %v, %v", reply, err)
+	}
+	if reply, err := javaSend("map_remove_if " + name + ` "rm" "gone"`); err != nil || reply["ok"] != true {
+		t.Fatalf("java remove(K,V) match = %v, %v", reply, err)
+	}
+	if v, err := m.Get(testCtx, "rm"); err != nil || v != nil {
+		t.Fatalf("Go Get after java removeIf = %v, %v", v, err)
+	}
+	if err := m.Put(testCtx, "rm2", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := javaSend("map_remove " + name + ` "rm2"`); err != nil || reply["value"] != "old" {
+		t.Fatalf("java remove(K) = %v, %v", reply, err)
+	}
 }
 
 func TestJavaInterop_RAtomicLong(t *testing.T) {
@@ -351,6 +370,18 @@ func TestJavaInterop_RBloomFilter(t *testing.T) {
 	}
 	if reply, err := javaSend("bloom_contains " + name + ` "banana"`); err != nil || reply["contains"] != true {
 		t.Fatalf("java contains(Go banana) = %v, %v", reply, err)
+	}
+	if reply, err := javaSend("bloom_exists " + name + ` "apple" "no-such"`); err != nil {
+		t.Fatal(err)
+	} else {
+		vals, ok := reply["value"].([]any)
+		if !ok || len(vals) != 1 || vals[0] != "apple" {
+			t.Fatalf("java exists = %#v", reply["value"])
+		}
+	}
+	present, err := f.Exists(testCtx, "banana", "no-such")
+	if err != nil || len(present) != 1 || present[0] != "banana" {
+		t.Fatalf("Go Exists = %#v, %v", present, err)
 	}
 }
 

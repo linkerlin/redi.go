@@ -122,6 +122,18 @@ func TestJavaInterop_RList(t *testing.T) {
 	if reply, err := javaSend("list_size " + name); err != nil || !numEq(reply["size"], 3) {
 		t.Fatalf("java size = %v, %v", reply, err)
 	}
+	got, err := l.GetMany(testCtx, 0, 2)
+	if err != nil || len(got) != 2 || got[0] != "alpha" || !numEq(got[1], 42) {
+		t.Fatalf("Go GetMany = %#v, %v", got, err)
+	}
+	if reply, err := javaSend("list_get_many " + name + " 1 0"); err != nil {
+		t.Fatal(err)
+	} else {
+		vals, ok := reply["value"].([]any)
+		if !ok || len(vals) != 2 || vals[0] != "beta" || vals[1] != "alpha" {
+			t.Fatalf("java get(int...) = %#v", reply["value"])
+		}
+	}
 }
 
 func TestJavaInterop_RScoredSortedSet(t *testing.T) {
@@ -220,6 +232,17 @@ func TestJavaInterop_RBucket(t *testing.T) {
 	if ttl, err := b.RemainTTL(testCtx); err != nil || ttl <= 0 {
 		t.Fatalf("Go RemainTTL after Java getAndExpire = %v, %v", ttl, err)
 	}
+	if reply, err := javaSend("bucket_expire_if_set " + name + " 120000"); err != nil || reply["ok"] != true {
+		t.Fatalf("java expireIfSet = %v, %v", reply, err)
+	}
+	if at, err := b.ExpireTime(testCtx); err != nil || at <= 0 {
+		t.Fatalf("Go ExpireTime = %d, %v", at, err)
+	}
+	if reply, err := javaSend("bucket_expire_time " + name); err != nil {
+		t.Fatal(err)
+	} else if !ttlPositive(reply["value"]) {
+		t.Fatalf("java getExpireTime = %v", reply["value"])
+	}
 }
 
 func TestJavaInterop_RBinaryStream(t *testing.T) {
@@ -302,6 +325,13 @@ func TestJavaInterop_RMapCache(t *testing.T) {
 	}
 	if reply, err := javaSend("mapcache_get_ttl_only " + name + ` "gk"`); err != nil || reply["value"] != "gv" {
 		t.Fatalf("java getWithTTLOnly = %v, %v", reply, err)
+	}
+	mustJava(t, "mapcache_putall_ttl", name, `"pk"`, `"pv"`, "60000")
+	if v, err := mc.Get(testCtx, "pk"); err != nil || v != "pv" {
+		t.Fatalf("Go Get after java putAll+ttl = %v, %v", v, err)
+	}
+	if rem, err := mc.RemainTTLForKey(testCtx, "pk"); err != nil || rem <= 0 {
+		t.Fatalf("Go RemainTTLForKey after java putAll+ttl = %v, %v", rem, err)
 	}
 }
 

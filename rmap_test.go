@@ -188,3 +188,41 @@ func TestRMap_ClearDeletesRedisKey(t *testing.T) {
 		t.Fatalf("Exists after Clear = %v, %v; want false", ok, err)
 	}
 }
+
+func TestRMap_RemoveAndRemoveIf(t *testing.T) {
+	client := newTestClient(t)
+	m := client.GetRMap(uniqueKey(t, "map-rm"))
+	defer m.Clear(testCtx) //nolint:errcheck
+
+	if err := m.Put(testCtx, "k", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := m.RemoveIf(testCtx, "k", "nope")
+	if err != nil || ok {
+		t.Fatalf("RemoveIf mismatch = %v, %v; want false", ok, err)
+	}
+	v, err := m.Get(testCtx, "k")
+	if err != nil || v != "v1" {
+		t.Fatalf("Get after mismatch = %v, %v", v, err)
+	}
+	ok, err = m.RemoveIf(testCtx, "k", "v1")
+	if err != nil || !ok {
+		t.Fatalf("RemoveIf match = %v, %v; want true", ok, err)
+	}
+	v, err = m.Get(testCtx, "k")
+	if err != nil || v != nil {
+		t.Fatalf("Get after RemoveIf = %v, %v; want nil", v, err)
+	}
+
+	if err := m.Put(testCtx, "k", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	prev, err := m.Remove(testCtx, "k")
+	if err != nil || prev != "v2" {
+		t.Fatalf("Remove = %v, %v; want v2", prev, err)
+	}
+	prev, err = m.Remove(testCtx, "k")
+	if err != nil || prev != nil {
+		t.Fatalf("Remove absent = %v, %v; want nil", prev, err)
+	}
+}
