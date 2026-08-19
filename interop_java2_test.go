@@ -210,6 +210,16 @@ func TestJavaInterop_RBucket(t *testing.T) {
 			t.Fatalf("java get of Go map = %#v", reply["value"])
 		}
 	}
+
+	if err := b.Set(testCtx, "ttl-me"); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := javaSend("bucket_getex " + name + " 60000"); err != nil || reply["value"] != "ttl-me" {
+		t.Fatalf("java getAndExpire = %v, %v", reply, err)
+	}
+	if ttl, err := b.RemainTTL(testCtx); err != nil || ttl <= 0 {
+		t.Fatalf("Go RemainTTL after Java getAndExpire = %v, %v", ttl, err)
+	}
 }
 
 func TestJavaInterop_RBinaryStream(t *testing.T) {
@@ -280,6 +290,18 @@ func TestJavaInterop_RMapCache(t *testing.T) {
 	}
 	if reply, err := javaSend("mapcache_get " + name + ` "gk"`); err != nil || reply["value"] != "gv" {
 		t.Fatalf("java read of Go mapcache entry = %v, %v", reply, err)
+	}
+
+	if reply, err := javaSend("mapcache_ttl " + name + ` "jk"`); err != nil {
+		t.Fatal(err)
+	} else if !ttlPositive(reply["ttl"]) {
+		t.Fatalf("java remainTimeToLive = %v", reply["ttl"])
+	}
+	if rem, err := mc.RemainTTLForKey(testCtx, "jk"); err != nil || rem <= 0 {
+		t.Fatalf("Go RemainTTLForKey = %v, %v", rem, err)
+	}
+	if reply, err := javaSend("mapcache_get_ttl_only " + name + ` "gk"`); err != nil || reply["value"] != "gv" {
+		t.Fatalf("java getWithTTLOnly = %v, %v", reply, err)
 	}
 }
 

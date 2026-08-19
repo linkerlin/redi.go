@@ -174,6 +174,43 @@ func (b *RBucket) CompareAndSet(ctx context.Context, expect, update any) (bool, 
 	return n == 1, err
 }
 
+// GetAndExpire returns the value and sets a relative TTL (GETEX PX).
+func (b *RBucket) GetAndExpire(ctx context.Context, ttl time.Duration) (any, error) {
+	v, err := b.rc().GetEx(ctx, b.name, ttl).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return b.c.codec.Decode(v)
+}
+
+// GetAndExpireAt returns the value and sets an absolute expiry (GETEX PXAT).
+func (b *RBucket) GetAndExpireAt(ctx context.Context, at time.Time) (any, error) {
+	v, err := bucketGetExPxatScript.Run(ctx, b.rc(),
+		[]string{b.name}, at.UnixMilli()).Text()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return b.c.codec.Decode(v)
+}
+
+// GetAndClearExpire returns the value and removes its TTL (GETEX PERSIST).
+func (b *RBucket) GetAndClearExpire(ctx context.Context) (any, error) {
+	v, err := b.rc().GetEx(ctx, b.name, 0).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return b.c.codec.Decode(v)
+}
+
 // CompareAndDelete atomically deletes the value when it equals expect.
 func (b *RBucket) CompareAndDelete(ctx context.Context, expect any) (bool, error) {
 	encExpect, err := b.c.codec.Encode(expect)
@@ -212,4 +249,8 @@ if redis.call('exists', KEYS[1]) == 0 then
     return 1
 end
 return 0
+`)
+
+var bucketGetExPxatScript = redis.NewScript(`
+return redis.call('getex', KEYS[1], 'pxat', ARGV[1])
 `)

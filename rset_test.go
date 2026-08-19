@@ -33,6 +33,24 @@ func TestRSet_AddContainsRemove(t *testing.T) {
 	}
 }
 
+func TestRSet_ContainsEach(t *testing.T) {
+	client := newTestClient(t)
+	s := client.GetSet(uniqueKey(t, "set-each"))
+	defer s.Clear(testCtx) //nolint:errcheck
+
+	if err := s.Add(testCtx, "a", "b", "c"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ContainsEach(testCtx, "b", "z", "a")
+	if err != nil || len(got) != 2 || got[0] != "b" || got[1] != "a" {
+		t.Fatalf("ContainsEach = %v, %v; want [b a]", got, err)
+	}
+	none, err := s.ContainsEach(testCtx, "x", "y")
+	if err != nil || len(none) != 0 {
+		t.Fatalf("ContainsEach miss = %v, %v", none, err)
+	}
+}
+
 func TestRSet_CountedRandomMoveReadAll(t *testing.T) {
 	client := newTestClient(t)
 	name := uniqueKey(t, "set2")

@@ -100,6 +100,56 @@ func TestRSemaphore_TryAcquireWait(t *testing.T) {
 	}
 }
 
+func TestRSemaphore_TrySetPermitsPublishes(t *testing.T) {
+	client := newTestClient(t)
+	name := uniqueKey(t, "sem-setpub")
+	s := client.GetSemaphore(name)
+	defer s.Delete(testCtx) //nolint:errcheck
+
+	channel := "redisson_sc:{" + name + "}"
+	sub := client.Redis().Subscribe(testCtx, channel)
+	defer sub.Close() //nolint:errcheck
+	if _, err := sub.Receive(testCtx); err != nil {
+		t.Fatal("subscribe ack:", err)
+	}
+	msgs := sub.Channel()
+
+	ok, err := s.TrySetPermits(testCtx, 3)
+	if err != nil || !ok {
+		t.Fatalf("TrySetPermits = %v, %v", ok, err)
+	}
+	select {
+	case msg := <-msgs:
+		if msg.Payload != "3" {
+			t.Fatalf("publish payload = %q, want 3", msg.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("TrySetPermits did not PUBLISH to redisson_sc")
+	}
+
+	ok, err = s.TrySetPermits(testCtx, 9)
+	if err != nil || ok {
+		t.Fatalf("second TrySetPermits = %v, %v; want false", ok, err)
+	}
+	select {
+	case msg := <-msgs:
+		t.Fatalf("second TrySetPermits published %q", msg.Payload)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	nameTTL := uniqueKey(t, "sem-setttl")
+	st := client.GetSemaphore(nameTTL)
+	defer st.Delete(testCtx) //nolint:errcheck
+	ok, err = st.TrySetPermitsWithTTL(testCtx, 2, time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("TrySetPermitsWithTTL = %v, %v", ok, err)
+	}
+	ttl, err := st.RemainTTL(testCtx)
+	if err != nil || ttl <= 0 {
+		t.Fatalf("TTL after TrySetPermitsWithTTL = %v, %v", ttl, err)
+	}
+}
+
 func TestRCountDownLatch(t *testing.T) {
 	client := newTestClient(t)
 	l := client.GetCountDownLatch(uniqueKey(t, "cdl"))

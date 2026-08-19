@@ -86,6 +86,28 @@ func (s *RSet) Contains(ctx context.Context, member any) (bool, error) {
 	return s.rc().SIsMember(ctx, s.name, enc).Result()
 }
 
+// ContainsEach returns the subset of members that are in the set (SMISMEMBER).
+func (s *RSet) ContainsEach(ctx context.Context, members ...any) ([]any, error) {
+	if len(members) == 0 {
+		return []any{}, nil
+	}
+	enc, err := s.encodeAll(members)
+	if err != nil {
+		return nil, err
+	}
+	flags, err := s.rc().SMIsMember(ctx, s.name, enc...).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(members))
+	for i, ok := range flags {
+		if ok {
+			out = append(out, members[i])
+		}
+	}
+	return out, nil
+}
+
 // Members returns all members in the set (decoded).
 func (s *RSet) Members(ctx context.Context) ([]any, error) {
 	vals, err := s.rc().SMembers(ctx, s.name).Result()

@@ -50,6 +50,32 @@ func (k *RKeys) Expire(ctx context.Context, key string, ttl time.Duration) (bool
 	return k.c.rc.Expire(ctx, key, ttl).Result()
 }
 
+// ExpireMany sets the same TTL on many keys and returns how many succeeded
+// (Redisson expire(Duration, names...)).
+func (k *RKeys) ExpireMany(ctx context.Context, ttl time.Duration, names ...string) (int64, error) {
+	if len(names) == 0 {
+		return 0, nil
+	}
+	pipe := k.c.rc.Pipeline()
+	cmds := make([]*redis.BoolCmd, len(names))
+	for i, name := range names {
+		cmds[i] = pipe.Expire(ctx, name, ttl)
+	}
+	_, err := pipe.Exec(ctx)
+	var n int64
+	for _, cmd := range cmds {
+		if cmd.Err() == nil && cmd.Val() {
+			n++
+		}
+	}
+	return n, err
+}
+
+// GetSlot returns the Redis Cluster hash slot for key (CRC16 with hash-tag).
+func (k *RKeys) GetSlot(key string) int {
+	return redisSlot(key)
+}
+
 // ExpireAt sets an absolute expiry time on a key.
 func (k *RKeys) ExpireAt(ctx context.Context, key string, at time.Time) (bool, error) {
 	return k.c.rc.ExpireAt(ctx, key, at).Result()
@@ -173,13 +199,14 @@ func (k *RKeys) deletePattern(ctx context.Context, pattern string, unlink bool) 
 			return nil
 		}
 		var err error
+		var n int64
 		if unlink {
-			_, err = k.c.rc.Unlink(ctx, batch...).Result()
+			n, err = k.c.rc.Unlink(ctx, batch...).Result()
 		} else {
-			_, err = k.c.rc.Del(ctx, batch...).Result()
+			n, err = k.c.rc.Del(ctx, batch...).Result()
 		}
 		if err == nil {
-			total += int64(len(batch))
+			total += n
 		}
 		batch = batch[:0]
 		return err

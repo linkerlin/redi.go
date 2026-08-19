@@ -97,6 +97,75 @@ func TestRBucket_SyncAPIs(t *testing.T) {
 	}
 }
 
+func TestRBucket_GetAndExpire(t *testing.T) {
+	client := newTestClient(t)
+	b := client.GetBucket(uniqueKey(t, "bucket-getex"))
+	defer b.Delete(testCtx) //nolint:errcheck
+
+	if err := b.Set(testCtx, "live"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.GetAndExpire(testCtx, time.Minute)
+	if err != nil || got != "live" {
+		t.Fatalf("GetAndExpire = %v, %v", got, err)
+	}
+	ttl, err := b.RemainTTL(testCtx)
+	if err != nil || ttl <= 0 {
+		t.Fatalf("RemainTTL after GetAndExpire = %v, %v", ttl, err)
+	}
+	got, err = b.GetAndClearExpire(testCtx)
+	if err != nil || got != "live" {
+		t.Fatalf("GetAndClearExpire = %v, %v", got, err)
+	}
+	ttl, err = b.RemainTTL(testCtx)
+	if err != nil || ttl >= 0 {
+		t.Fatalf("RemainTTL after persist = %v, %v; want < 0", ttl, err)
+	}
+	got, err = b.GetAndExpireAt(testCtx, time.Now().Add(time.Minute))
+	if err != nil || got != "live" {
+		t.Fatalf("GetAndExpireAt = %v, %v", got, err)
+	}
+
+	dump, err := b.Dump(testCtx)
+	if err != nil || len(dump) == 0 {
+		t.Fatalf("Dump = %d, %v", len(dump), err)
+	}
+	copyName := uniqueKey(t, "bucket-copy")
+	other := client.GetBucket(copyName)
+	defer other.Delete(testCtx) //nolint:errcheck
+	if ok, err := b.Copy(testCtx, copyName); err != nil || !ok {
+		t.Fatalf("Copy = %v, %v", ok, err)
+	}
+	copied, err := other.Get(testCtx)
+	if err != nil || copied != "live" {
+		t.Fatalf("copied Get = %v, %v", copied, err)
+	}
+	if err := other.Set(testCtx, "overwrite"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := b.CopyAndReplace(testCtx, copyName); err != nil || !ok {
+		t.Fatalf("CopyAndReplace = %v, %v", ok, err)
+	}
+	if n, err := b.SizeInMemory(testCtx); err != nil || n <= 0 {
+		t.Fatalf("SizeInMemory = %d, %v", n, err)
+	}
+	if _, err := b.IdleTime(testCtx); err != nil {
+		t.Fatalf("IdleTime: %v", err)
+	}
+	fresh := client.GetBucket(uniqueKey(t, "bucket-restore"))
+	defer fresh.Delete(testCtx) //nolint:errcheck
+	if err := fresh.Restore(testCtx, dump); err != nil {
+		t.Fatal("Restore:", err)
+	}
+	got, err = fresh.Get(testCtx)
+	if err != nil || got != "live" {
+		t.Fatalf("Restore Get = %v, %v", got, err)
+	}
+	if err := fresh.RestoreAndReplace(testCtx, dump); err != nil {
+		t.Fatal("RestoreAndReplace:", err)
+	}
+}
+
 func TestRDeque(t *testing.T) {
 	client := newTestClient(t)
 	d := client.GetDeque(uniqueKey(t, "deque"))
@@ -169,6 +238,26 @@ func TestRDeque_OccurrenceAndMove(t *testing.T) {
 	moved, err = bd.MoveWithTimeout(testCtx, dst, "LEFT", "RIGHT", time.Second)
 	if err != nil || moved != "blk" {
 		t.Fatalf("MoveWithTimeout = %v, %v", moved, err)
+	}
+}
+
+func TestRDeque_PollN(t *testing.T) {
+	client := newTestClient(t)
+	d := client.GetDeque(uniqueKey(t, "deque-n"))
+	defer d.Clear(testCtx) //nolint:errcheck
+
+	_ = d.AddLast(testCtx, "a", "b", "c", "d")
+	head, err := d.PollFirstN(testCtx, 2)
+	if err != nil || len(head) != 2 || head[0] != "a" || head[1] != "b" {
+		t.Fatalf("PollFirstN = %v, %v", head, err)
+	}
+	tail, err := d.PollLastN(testCtx, 2)
+	if err != nil || len(tail) != 2 || tail[0] != "d" || tail[1] != "c" {
+		t.Fatalf("PollLastN = %v, %v; want [d c]", tail, err)
+	}
+	empty, err := d.PollFirstN(testCtx, 3)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("PollFirstN empty = %v, %v", empty, err)
 	}
 }
 

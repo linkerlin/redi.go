@@ -56,9 +56,44 @@ redis.call('publish', KEYS[2], value)
 return 1
 `)
 
+// Java RedissonSemaphore.trySetPermits: SET only when absent, then PUBLISH
+// to redisson_sc:{name} so blocked acquirers wake (SETNX alone is silent).
+var semTrySetPermitsScript = redis.NewScript(`
+if redis.call('get', KEYS[1]) == false then
+    redis.call('set', KEYS[1], ARGV[1])
+    redis.call('publish', KEYS[2], ARGV[1])
+    return 1
+end
+return 0
+`)
+
+var semTrySetPermitsTTLScript = redis.NewScript(`
+if redis.call('get', KEYS[1]) == false then
+    redis.call('set', KEYS[1], ARGV[1], 'px', ARGV[2])
+    redis.call('publish', KEYS[2], ARGV[1])
+    return 1
+end
+return 0
+`)
+
 // TrySetPermits initializes the semaphore only when it does not exist.
 func (s *RSemaphore) TrySetPermits(ctx context.Context, permits int64) (bool, error) {
-	return s.rc().SetNX(ctx, s.name, permits, 0).Result()
+	n, err := semTrySetPermitsScript.Run(ctx, s.rc(),
+		[]string{s.name, s.channel}, permits).Int()
+	return n == 1, err
+}
+
+// TrySetPermitsWithTTL is TrySetPermits with a millisecond PEXPIRE on the
+// counter (Redisson trySetPermits(permits, Duration)).
+func (s *RSemaphore) TrySetPermitsWithTTL(
+	ctx context.Context, permits int64, ttl time.Duration,
+) (bool, error) {
+	if ttl <= 0 {
+		return s.TrySetPermits(ctx, permits)
+	}
+	n, err := semTrySetPermitsTTLScript.Run(ctx, s.rc(),
+		[]string{s.name, s.channel}, permits, ttl.Milliseconds()).Int()
+	return n == 1, err
 }
 
 // TryAcquire takes permits when available, returning false otherwise.

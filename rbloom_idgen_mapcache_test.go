@@ -168,3 +168,44 @@ func TestRMapCache_TTL(t *testing.T) {
 		t.Fatalf("Size after expiry = %d, %v; want 1", sz, err)
 	}
 }
+
+func TestRMapCache_RemainTTLMatchesJava(t *testing.T) {
+	client := newTestClient(t)
+	m := client.GetMapCache(uniqueKey(t, "mapcache-ttl"))
+	defer m.Clear(testCtx) //nolint:errcheck
+
+	missing, err := m.RemainTTLForKey(testCtx, "nope")
+	if err != nil || missing != -2*time.Millisecond {
+		t.Fatalf("missing RemainTTLForKey = %v, %v; want -2ms", missing, err)
+	}
+
+	if err := m.Put(testCtx, "stable", "v"); err != nil {
+		t.Fatal(err)
+	}
+	none, err := m.RemainTTLForKey(testCtx, "stable")
+	if err != nil || none != -time.Millisecond {
+		t.Fatalf("no-expiry RemainTTLForKey = %v, %v; want -1ms", none, err)
+	}
+
+	if err := m.Put(testCtx, "idle", "v", 0, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	idle, err := m.RemainTTLForKey(testCtx, "idle")
+	if err != nil || idle <= 0 || idle > time.Minute {
+		t.Fatalf("idle RemainTTLForKey = %v, %v; want (0, 1m]", idle, err)
+	}
+
+	if err := m.Put(testCtx, "ttl-only", "keep", time.Hour, 50*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if !eventual(t, 2*time.Second, func() bool {
+		rem, _ := m.RemainTTLForKey(testCtx, "ttl-only")
+		return rem == -2*time.Millisecond
+	}) {
+		t.Fatal("idle-expired RemainTTLForKey did not become -2ms")
+	}
+	still, err := m.GetWithTTLOnly(testCtx, "ttl-only")
+	if err != nil || still != "keep" {
+		t.Fatalf("GetWithTTLOnly after idle expiry = %v, %v; want keep", still, err)
+	}
+}

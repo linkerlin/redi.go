@@ -190,6 +190,21 @@ func numEq(v any, want int64) bool {
 	return false
 }
 
+func ttlPositive(v any) bool {
+	switch n := v.(type) {
+	case float64:
+		return n > 0
+	case int64:
+		return n > 0
+	case int:
+		return n > 0
+	case json.Number:
+		i, err := n.Int64()
+		return err == nil && i > 0
+	}
+	return false
+}
+
 func TestJavaProbe_Smoke(t *testing.T) {
 	javaProbe(t)
 	reply, err := javaSend("ping")

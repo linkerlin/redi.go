@@ -1089,25 +1089,58 @@ func (m *RMapCache) Size(ctx context.Context) (int64, error) {
 	return m.rc().HLen(ctx, m.name).Result()
 }
 
-// RemainTTLForKey returns the remaining per-entry TTL (-2 when absent).
+// mapCacheRemainTTLScript matches RedissonMapCache.remainTimeToLive:
+// missing/expired → -2; no TTL and no idle → -1; else min(ttl, idle) − now.
+var mapCacheRemainTTLScript = redis.NewScript(`
+local value = redis.call('hget', KEYS[1], ARGV[2])
+if value == false then
+    return -2
+end
+local t, val = struct.unpack('dLc0', value)
+local expireDate = 92233720368547758
+local expireDateScore = redis.call('zscore', KEYS[2], ARGV[2])
+if expireDateScore ~= false then
+    expireDate = tonumber(expireDateScore)
+end
+if t ~= 0 then
+    local expireIdle = redis.call('zscore', KEYS[3], ARGV[2])
+    if expireIdle ~= false then
+        expireDate = math.min(expireDate, tonumber(expireIdle))
+    end
+end
+if expireDate == 92233720368547758 then
+    return -1
+end
+if expireDate > tonumber(ARGV[1]) then
+    return expireDate - tonumber(ARGV[1])
+end
+return -2
+`)
+
+// RemainTTLForKey returns remaining TTL as a duration (PTTL convention:
+// -1ms = no expiry, -2ms = missing/expired). Idle timeout is included.
 func (m *RMapCache) RemainTTLForKey(ctx context.Context, field string) (time.Duration, error) {
-	ek := encodeKey(m.c.codec, field)
-	score, err := m.rc().ZScore(ctx, m.ttlKey, ek).Result()
-	if err == redis.Nil {
-		return -2, nil
-	}
-	if err != nil {
-		return 0, err
-	}
 	now, err := m.serverNowMs(ctx)
 	if err != nil {
 		return 0, err
 	}
-	remaining := time.Duration((score - float64(now)) * float64(time.Millisecond))
-	if remaining < 0 {
-		return -2, nil
+	ms, err := mapCacheRemainTTLScript.Run(ctx, m.rc(),
+		[]string{m.name, m.ttlKey, m.idleKey},
+		now, encodeKey(m.c.codec, field)).Int64()
+	if err != nil {
+		return 0, err
 	}
-	return remaining, nil
+	return time.Duration(ms) * time.Millisecond, nil
+}
+
+// GetWithTTLOnly returns the value after checking only explicit TTL.
+// Max-idle expiration is ignored and not renewed (Redisson getWithTTLOnly).
+func (m *RMapCache) GetWithTTLOnly(ctx context.Context, field string) (any, error) {
+	all, err := m.GetAllWithTTLOnly(ctx, field)
+	if err != nil {
+		return nil, err
+	}
+	return all[field], nil
 }
 
 // Clear removes the map and all deadline, access, and options companions.

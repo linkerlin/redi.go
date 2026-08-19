@@ -117,6 +117,58 @@ func (o *rObject) RemainTTL(ctx context.Context) (time.Duration, error) {
 	return d, err
 }
 
+// Dump serializes the key with Redis DUMP.
+func (o *rObject) Dump(ctx context.Context) ([]byte, error) {
+	raw, err := o.rc().Dump(ctx, o.name).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []byte(raw), nil
+}
+
+// Restore materializes DUMP bytes onto this key (fails if the key exists).
+func (o *rObject) Restore(ctx context.Context, state []byte) error {
+	return o.rc().Restore(ctx, o.name, 0, string(state)).Err()
+}
+
+// RestoreAndReplace is Restore with REPLACE.
+func (o *rObject) RestoreAndReplace(ctx context.Context, state []byte) error {
+	return o.rc().RestoreReplace(ctx, o.name, 0, string(state)).Err()
+}
+
+// Copy copies this key to dest in the current database (Redis COPY).
+func (o *rObject) Copy(ctx context.Context, dest string) (bool, error) {
+	n, err := o.rc().Copy(ctx, o.name, dest, o.c.cfg.DB, false).Result()
+	return n == 1, err
+}
+
+// CopyAndReplace is Copy with REPLACE.
+func (o *rObject) CopyAndReplace(ctx context.Context, dest string) (bool, error) {
+	n, err := o.rc().Copy(ctx, o.name, dest, o.c.cfg.DB, true).Result()
+	return n == 1, err
+}
+
+// IdleTime returns seconds since last access (OBJECT IDLETIME).
+func (o *rObject) IdleTime(ctx context.Context) (time.Duration, error) {
+	d, err := o.rc().ObjectIdleTime(ctx, o.name).Result()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	return d, err
+}
+
+// SizeInMemory returns MEMORY USAGE bytes (0 when the key is missing).
+func (o *rObject) SizeInMemory(ctx context.Context) (int64, error) {
+	n, err := o.rc().MemoryUsage(ctx, o.name).Result()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	return n, err
+}
+
 // serverNowMs returns the Redis server time in milliseconds. Score-based
 // structures (delayed queue, map cache, rate limiter) use the server clock
 // so multi-host deployments are immune to local clock skew.

@@ -113,6 +113,35 @@ func TestRKeys_SyncAPIs(t *testing.T) {
 	}
 }
 
+func TestRKeys_GetSlotAndExpireMany(t *testing.T) {
+	client := newTestClient(t)
+	keys := client.GetKeys()
+	a := uniqueKey(t, "keys-slot-a")
+	b := uniqueKey(t, "keys-slot-b")
+	t.Cleanup(func() { _, _ = keys.Delete(testCtx, a, b) })
+
+	if keys.GetSlot("foo{hash_tag}") != keys.GetSlot("bar{hash_tag}") {
+		t.Fatal("hash-tag keys must share a slot")
+	}
+	if keys.GetSlot("somekey") != 11058 {
+		t.Fatalf("GetSlot(somekey) = %d, want 11058", keys.GetSlot("somekey"))
+	}
+
+	if err := client.GetBucket(a).Set(testCtx, "va"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.GetBucket(b).Set(testCtx, "vb"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := keys.ExpireMany(testCtx, time.Minute, a, b, uniqueKey(t, "keys-missing"))
+	if err != nil || n != 2 {
+		t.Fatalf("ExpireMany = %d, %v; want 2", n, err)
+	}
+	if ttl, err := keys.RemainTTL(testCtx, a); err != nil || ttl <= 0 {
+		t.Fatalf("RemainTTL after ExpireMany = %v, %v", ttl, err)
+	}
+}
+
 func TestRBuckets(t *testing.T) {
 	client := newTestClient(t)
 	buckets := client.GetBuckets()

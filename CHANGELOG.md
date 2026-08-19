@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **方法级对齐（维护）**：RQueue `IndexOf` / `PollN` / `PollLastAndOfferFirstTo`；RDeque `PollFirstN` / `PollLastN`；RBucket `GetAndExpire` / `GetAndExpireAt` / `GetAndClearExpire`；RSet `ContainsEach`；RObject `Dump`/`Restore`/`Copy`/`IdleTime`/`SizeInMemory`；RKeys `GetSlot` / `ExpireMany`；RMapCache `GetWithTTLOnly`
+- **正确性**：RSemaphore `TrySetPermits` 对齐 Java Lua（初始化时 PUBLISH `redisson_sc`，并补 `TrySetPermitsWithTTL`）；RMapCache `RemainTTLForKey` 按 Java 计入 idle、无 TTL 返回 -1ms；RKeys `DeleteByPattern` 使用 DEL/UNLINK 实际删除数
 - **RDeque 方法级**：`RemoveFirstOccurrence` / `RemoveLastOccurrence`（LREM）与 `Move`（LMOVE）；`RBlockingDeque.MoveWithTimeout`（BLMOVE）；`Client.GetRedLock` 别名对齐 `getRedLock`
 
 ## v0.2.13 (2026-08-19) — 演进收官

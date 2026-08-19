@@ -349,6 +349,11 @@ public final class RedigoProbe {
                 RBucket<Object> b = rs.getBucket(a[1]);
                 reply(map("value", b.get()));
             }
+            case "bucket_getex" -> {
+                RBucket<Object> b = rs.getBucket(a[1]);
+                reply(map("value", b.getAndExpire(
+                        java.time.Duration.ofMillis(Long.parseLong(a[2])))));
+            }
             case "binary_set" -> {
                 RBinaryStream s = rs.getBinaryStream(a[1]);
                 byte[] value = Base64.getDecoder().decode(a[2]);
@@ -377,6 +382,14 @@ public final class RedigoProbe {
             case "mapcache_get" -> {
                 RMapCache<Object, Object> mc = rs.getMapCache(a[1]);
                 reply(map("value", mc.get(OM.readValue(a[2], Object.class))));
+            }
+            case "mapcache_ttl" -> {
+                RMapCache<Object, Object> mc = rs.getMapCache(a[1]);
+                reply(map("ttl", mc.remainTimeToLive(OM.readValue(a[2], Object.class))));
+            }
+            case "mapcache_get_ttl_only" -> {
+                RMapCache<Object, Object> mc = rs.getMapCache(a[1]);
+                reply(map("value", mc.getWithTTLOnly(OM.readValue(a[2], Object.class))));
             }
 
             case "dq_offer" -> {
@@ -929,6 +942,14 @@ public final class RedigoProbe {
                 RSet<Object> set = rs.getSet(a[1]);
                 reply(map("size", set.size()));
             }
+            case "set_contains_each" -> {
+                RSet<Object> set = rs.getSet(a[1]);
+                java.util.List<Object> query = new ArrayList<>();
+                for (int i = 2; i < a.length; i++) {
+                    query.add(OM.readValue(a[i], Object.class));
+                }
+                reply(map("values", new ArrayList<>(set.containsEach(query))));
+            }
 
             case "queue_offer" -> {
                 RQueue<Object> q = rs.getQueue(a[1]);
@@ -941,6 +962,18 @@ public final class RedigoProbe {
             case "queue_size" -> {
                 RQueue<Object> q = rs.getQueue(a[1]);
                 reply(map("size", q.size()));
+            }
+            case "queue_indexof" -> {
+                RQueue<Object> q = rs.getQueue(a[1]);
+                reply(map("index", q.indexOf(OM.readValue(a[2], Object.class))));
+            }
+            case "queue_move" -> {
+                RQueue<Object> q = rs.getQueue(a[1]);
+                reply(map("value", q.pollLastAndOfferFirstTo(a[2])));
+            }
+            case "queue_poll_n" -> {
+                RQueue<Object> q = rs.getQueue(a[1]);
+                reply(map("values", q.poll(Integer.parseInt(a[2]))));
             }
 
             case "smm_put" -> {

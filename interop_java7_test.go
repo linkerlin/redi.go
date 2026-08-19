@@ -198,6 +198,18 @@ func TestJavaInterop_RSet(t *testing.T) {
 	if n, err := set.Size(testCtx); err != nil || n != 2 {
 		t.Fatalf("Go Size = %d, %v", n, err)
 	}
+	if reply, err := javaSend("set_contains_each " + name + ` "gv" "missing" "jv"`); err != nil {
+		t.Fatal(err)
+	} else {
+		arr, _ := reply["values"].([]any)
+		seen := map[any]bool{}
+		for _, v := range arr {
+			seen[v] = true
+		}
+		if len(arr) != 2 || !seen["gv"] || !seen["jv"] {
+			t.Fatalf("java containsEach = %v", reply["values"])
+		}
+	}
 }
 
 func TestJavaInterop_RQueue(t *testing.T) {
@@ -222,6 +234,31 @@ func TestJavaInterop_RQueue(t *testing.T) {
 	}
 	if reply, err := javaSend("queue_poll " + name); err != nil || reply["value"] != "gb" {
 		t.Fatalf("java poll = %v, %v; want gb", reply, err)
+	}
+
+	src := uniqueKey(t, "jio-q-idx")
+	dst := uniqueKey(t, "jio-q-dst")
+	t.Cleanup(func() { interopCleanup(t, src, dst) })
+	q2 := client.GetQueue(src)
+	if err := q2.Offer(testCtx, "x", "y", "z"); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := javaSend("queue_indexof " + src + ` "y"`); err != nil || !numEq(reply["index"], 1) {
+		t.Fatalf("java indexOf = %v, %v; want 1", reply, err)
+	}
+	if reply, err := javaSend("queue_move " + src + " " + dst); err != nil || reply["value"] != "z" {
+		t.Fatalf("java pollLastAndOfferFirstTo = %v, %v; want z", reply, err)
+	}
+	if peeked, err := client.GetQueue(dst).Peek(testCtx); err != nil || peeked != "z" {
+		t.Fatalf("Go dest Peek = %v, %v; want z", peeked, err)
+	}
+	if reply, err := javaSend("queue_poll_n " + src + " 2"); err != nil {
+		t.Fatal(err)
+	} else {
+		arr, _ := reply["values"].([]any)
+		if len(arr) != 2 || arr[0] != "x" || arr[1] != "y" {
+			t.Fatalf("java poll(2) = %v", reply["values"])
+		}
 	}
 }
 

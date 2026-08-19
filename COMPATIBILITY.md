@@ -72,7 +72,7 @@
 | RShardedTopic | Redis 7+ SSUBSCRIBE/SSPUBLISH（codec 编码消息；PUBSUB SHARDNUMSUB 计数） | Redis 原生协议，跨语言自动互通 ✅ |
 | RFunction | FUNCTION LOAD(REPLACE)/DELETE/LIST/FLUSH + FCALL/FCALL_RO | Redis 原生命令，跨语言自动互通 ✅ |
 | 嵌套复合值编码 | 递归类型包装（map→@class / slice→ArrayList 包装，任意深度） | **Redisson 4.6.1 深层嵌套（map>array>map>array）实测 ✅** |
-| RKeys | DBSIZE/SCAN 迭代/模式删除（Del/Unlink）/Copy/Type/FlushDB | 单元测试 ✅ |
+| RKeys | DBSIZE/SCAN 迭代/模式删除（Del/Unlink 计实际删除数）/Copy/Type/FlushDB/GetSlot/ExpireMany | 单元测试 ✅ |
 | RBuckets | MGET/MSET/MSETNX + 批量 TTL（pipeline） | 单元测试 ✅ |
 | RScript | EVAL/EVALSHA/ScriptLoad/ScriptExists + ReturnType 转换 | 单元测试 ✅ |
 | RBatch | 管道批处理（Map/Bucket/List/Set/Queue/Deque/AtomicLong/AtomicDouble/ScoredSortedSet），实测 ~7x | 单元测试 + 基准 + **Redisson 4.6.1 createBatch map put 双向实测 ✅** |

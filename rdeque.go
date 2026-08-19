@@ -186,6 +186,36 @@ func (d *RDeque) ReadAll(ctx context.Context) ([]any, error) {
 	return out, nil
 }
 
+// PollFirstN pops up to n elements from the head (Redisson pollFirst(limit)).
+func (d *RDeque) PollFirstN(ctx context.Context, n int) ([]any, error) {
+	if n <= 0 {
+		return []any{}, nil
+	}
+	vals, err := d.rc().LPopCount(ctx, d.name, n).Result()
+	if err == redis.Nil {
+		return []any{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeCodecSlice(d.c, vals)
+}
+
+// PollLastN pops up to n elements from the tail (Redisson pollLast(limit)).
+func (d *RDeque) PollLastN(ctx context.Context, n int) ([]any, error) {
+	if n <= 0 {
+		return []any{}, nil
+	}
+	vals, err := d.rc().RPopCount(ctx, d.name, n).Result()
+	if err == redis.Nil {
+		return []any{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeCodecSlice(d.c, vals)
+}
+
 // Clear removes all elements.
 func (d *RDeque) Clear(ctx context.Context) error {
 	return d.Delete(ctx)

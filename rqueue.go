@@ -122,8 +122,59 @@ func (q *RQueue) ReadAll(ctx context.Context) ([]any, error) {
 	return out, nil
 }
 
+// PollN pops up to n elements from the head (Redisson poll(limit) / LPOP COUNT).
+func (q *RQueue) PollN(ctx context.Context, n int) ([]any, error) {
+	if n <= 0 {
+		return []any{}, nil
+	}
+	vals, err := q.rc().LPopCount(ctx, q.name, n).Result()
+	if err == redis.Nil {
+		return []any{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeCodecSlice(q.c, vals)
+}
+
+// IndexOf returns the first index of value, or -1 when absent (LPOS / List).
+func (q *RQueue) IndexOf(ctx context.Context, value any) (int64, error) {
+	enc, err := q.c.codec.Encode(value)
+	if err != nil {
+		return -1, err
+	}
+	return listIndexOfScript.Run(ctx, q.rc(), []string{q.name}, enc).Int64()
+}
+
+// PollLastAndOfferFirstTo atomically RPOPLPUSHes the tail onto dest's head.
+func (q *RQueue) PollLastAndOfferFirstTo(ctx context.Context, dest string) (any, error) {
+	v, err := q.rc().RPopLPush(ctx, q.name, dest).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return q.c.codec.Decode(v)
+}
+
 // Clear removes all elements.
 func (q *RQueue) Clear(ctx context.Context) error { return q.Delete(ctx) }
+
+func decodeCodecSlice(c *Client, vals []string) ([]any, error) {
+	if len(vals) == 0 {
+		return []any{}, nil
+	}
+	out := make([]any, len(vals))
+	for i, v := range vals {
+		decoded, err := c.codec.Decode(v)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = decoded
+	}
+	return out, nil
+}
 
 func (q *RQueue) encodeAll(values []any) ([]any, error) {
 	enc := make([]any, len(values))
